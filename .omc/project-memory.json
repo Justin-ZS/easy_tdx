@@ -1,0 +1,396 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1779337271902,
+  "projectRoot": "D:\\python\\xmtdx",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Python",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "pyproject.toml"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "pytest",
+        "version": null,
+        "category": "testing"
+      }
+    ],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": "python -m ruff check src/ tests/ 2>&1 && python -m pytest tests/unit/ -q 2>&1",
+    "lintCommand": "ruff check",
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "scripts",
+      "src",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 3,
+      "lastAccessed": 1779337271876,
+      "keyFiles": [
+        "probe_unknowns.py",
+        "verify_fixes_20260415.py",
+        "__init__.py"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 0,
+      "lastAccessed": 1779337271876,
+      "keyFiles": []
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1779337271877,
+      "keyFiles": [
+        "__init__.py"
+      ]
+    },
+    "tests\\fixtures": {
+      "path": "tests\\fixtures",
+      "purpose": "Test fixtures",
+      "fileCount": 24,
+      "lastAccessed": 1779337271879,
+      "keyFiles": [
+        "company_info_category.hex",
+        "company_info_category.json",
+        "company_info_content.hex"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "src\\easy_tdx\\client.py",
+      "accessCount": 116,
+      "lastAccessed": 1779392745160,
+      "type": "file"
+    },
+    {
+      "path": "src\\easy_tdx\\_df.py",
+      "accessCount": 12,
+      "lastAccessed": 1779391749202,
+      "type": "file"
+    },
+    {
+      "path": "tests\\unit\\test_a_share_extensions.py",
+      "accessCount": 9,
+      "lastAccessed": 1779392575071,
+      "type": "file"
+    },
+    {
+      "path": "tests\\unit\\test_block_info.py",
+      "accessCount": 6,
+      "lastAccessed": 1779387538331,
+      "type": "file"
+    },
+    {
+      "path": "examples\\05_transaction\\transaction_data.py",
+      "accessCount": 6,
+      "lastAccessed": 1779390229059,
+      "type": "file"
+    },
+    {
+      "path": "examples\\05_transaction\\history_transaction.py",
+      "accessCount": 6,
+      "lastAccessed": 1779390229831,
+      "type": "file"
+    },
+    {
+      "path": "src\\easy_tdx\\models\\timeseries.py",
+      "accessCount": 6,
+      "lastAccessed": 1779391466426,
+      "type": "file"
+    },
+    {
+      "path": "examples\\04_minute\\minute_time_data.py",
+      "accessCount": 4,
+      "lastAccessed": 1779392745091,
+      "type": "file"
+    },
+    {
+      "path": "pyproject.toml",
+      "accessCount": 4,
+      "lastAccessed": 1779394669812,
+      "type": "file"
+    },
+    {
+      "path": "src",
+      "accessCount": 4,
+      "lastAccessed": 1779394669916,
+      "type": "directory"
+    },
+    {
+      "path": "scripts\\ruff_hook.py",
+      "accessCount": 3,
+      "lastAccessed": 1779337842663,
+      "type": "file"
+    },
+    {
+      "path": "src\\xmtdx\\transport\\sync.py",
+      "accessCount": 3,
+      "lastAccessed": 1779338445930,
+      "type": "file"
+    },
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 3,
+      "lastAccessed": 1779386454500,
+      "type": "file"
+    },
+    {
+      "path": "src/easy_tdx/client.py",
+      "accessCount": 3,
+      "lastAccessed": 1779387035554,
+      "type": "directory"
+    },
+    {
+      "path": "examples\\03_kline\\security_bars.py",
+      "accessCount": 3,
+      "lastAccessed": 1779389362430,
+      "type": "file"
+    },
+    {
+      "path": "examples\\03_kline\\index_bars.py",
+      "accessCount": 3,
+      "lastAccessed": 1779389362522,
+      "type": "file"
+    },
+    {
+      "path": "examples\\06_finance\\xdxr_info.py",
+      "accessCount": 3,
+      "lastAccessed": 1779389518814,
+      "type": "file"
+    },
+    {
+      "path": "examples\\08_fund_flow\\history_fund_flow.py",
+      "accessCount": 3,
+      "lastAccessed": 1779389518888,
+      "type": "file"
+    },
+    {
+      "path": "examples\\02_market_info\\security_quotes.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386629339,
+      "type": "file"
+    },
+    {
+      "path": "examples\\02_market_info\\security_list.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386630075,
+      "type": "file"
+    },
+    {
+      "path": "examples\\02_market_info\\security_list_all.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386630813,
+      "type": "file"
+    },
+    {
+      "path": "examples\\02_market_info\\market_stat.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386631522,
+      "type": "file"
+    },
+    {
+      "path": "examples\\04_minute\\history_minute_data.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386654282,
+      "type": "file"
+    },
+    {
+      "path": "examples\\06_finance\\finance_info.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386691184,
+      "type": "file"
+    },
+    {
+      "path": "examples\\06_finance\\price_limits.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386691927,
+      "type": "file"
+    },
+    {
+      "path": "examples\\06_finance\\company_info.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386692682,
+      "type": "file"
+    },
+    {
+      "path": "examples\\07_block\\block_info.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386693419,
+      "type": "file"
+    },
+    {
+      "path": "examples\\08_fund_flow\\fund_flow.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386694151,
+      "type": "file"
+    },
+    {
+      "path": "examples\\01_connection\\async_connect.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386740298,
+      "type": "file"
+    },
+    {
+      "path": "examples\\09_file_download\\report_file.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386827437,
+      "type": "file"
+    },
+    {
+      "path": "examples\\10_offline\\block_data.py",
+      "accessCount": 2,
+      "lastAccessed": 1779386828134,
+      "type": "file"
+    },
+    {
+      "path": "examples/10_offline",
+      "accessCount": 2,
+      "lastAccessed": 1779386853771,
+      "type": "directory"
+    },
+    {
+      "path": "src\\easy_tdx\\models\\bar.py",
+      "accessCount": 2,
+      "lastAccessed": 1779389275981,
+      "type": "file"
+    },
+    {
+      "path": "src\\easy_tdx\\models\\stats.py",
+      "accessCount": 2,
+      "lastAccessed": 1779389276114,
+      "type": "file"
+    },
+    {
+      "path": "src\\easy_tdx\\models\\finance.py",
+      "accessCount": 2,
+      "lastAccessed": 1779389276205,
+      "type": "file"
+    },
+    {
+      "path": "examples",
+      "accessCount": 2,
+      "lastAccessed": 1779389346769,
+      "type": "directory"
+    },
+    {
+      "path": "README.md",
+      "accessCount": 2,
+      "lastAccessed": 1779394525974,
+      "type": "file"
+    },
+    {
+      "path": "src\\xmtdx\\__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1779337399287,
+      "type": "file"
+    },
+    {
+      "path": "src\\xmtdx\\client.py",
+      "accessCount": 1,
+      "lastAccessed": 1779337400354,
+      "type": "file"
+    },
+    {
+      "path": "src\\xmtdx\\models\\enums.py",
+      "accessCount": 1,
+      "lastAccessed": 1779337406304,
+      "type": "file"
+    },
+    {
+      "path": ".claude\\skills\\verify\\SKILL.md",
+      "accessCount": 1,
+      "lastAccessed": 1779337597439,
+      "type": "file"
+    },
+    {
+      "path": ".claude\\settings.json",
+      "accessCount": 1,
+      "lastAccessed": 1779337793420,
+      "type": "file"
+    },
+    {
+      "path": "C:\\new_jyplug\\connect.cfg",
+      "accessCount": 1,
+      "lastAccessed": 1779338269266,
+      "type": "file"
+    },
+    {
+      "path": "src\\xmtdx\\transport\\async_.py",
+      "accessCount": 1,
+      "lastAccessed": 1779338280552,
+      "type": "file"
+    },
+    {
+      "path": "src\\easy_tdx\\models\\__init__.py",
+      "accessCount": 1,
+      "lastAccessed": 1779384829108,
+      "type": "file"
+    },
+    {
+      "path": "src\\easy_tdx\\models\\security.py",
+      "accessCount": 1,
+      "lastAccessed": 1779384845552,
+      "type": "file"
+    },
+    {
+      "path": "src\\easy_tdx\\models\\quote.py",
+      "accessCount": 1,
+      "lastAccessed": 1779384845648,
+      "type": "file"
+    },
+    {
+      "path": "examples\\02_market_info\\security_count.py",
+      "accessCount": 1,
+      "lastAccessed": 1779386494822,
+      "type": "file"
+    },
+    {
+      "path": "examples\\01_connection\\ping_servers.py",
+      "accessCount": 1,
+      "lastAccessed": 1779386715403,
+      "type": "file"
+    },
+    {
+      "path": "examples\\01_connection\\connect_best_host.py",
+      "accessCount": 1,
+      "lastAccessed": 1779386715553,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
