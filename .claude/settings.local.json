@@ -8,7 +8,10 @@
       "Bash(ruff check *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "mcp__zread__get_repo_structure",
+      "Bash(pip install *)",
+      "mcp__web-reader__webReader"
     ]
   }
 }

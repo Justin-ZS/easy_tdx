@@ -1,17 +1,18 @@
 """高层行情 API：TdxClient（同步）和 AsyncTdxClient（asyncio）。"""
 
+import asyncio
 import json
 import logging
-import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import TypeVar
 from zoneinfo import ZoneInfo
 
 from .codec.block import parse_block_dat
+from .codec.financial import parse_financial_dat, parse_financial_file_list
 from .codec.industry import parse_tdxhy_cfg
 from .codec.price_rules import compute_price_limits, get_no_limit_window_days
 from .commands.base import BaseCommand
@@ -30,13 +31,20 @@ from .commands.xdxr_info import GetXdxrInfoCmd
 from .exceptions import TdxConnectionError
 from .models.bar import SecurityBar
 from .models.enums import KlineCategory, Market
-from .models.finance import CompanyInfoCategory, FinanceInfo, TdxBlock, XdxrRecord
+from .models.finance import (
+    CompanyInfoCategory,
+    FinanceInfo,
+    FinancialFileInfo,
+    FinancialRecord,
+    TdxBlock,
+    XdxrRecord,
+)
 from .models.quote import SecurityQuote
 from .models.security import SecurityInfo
 from .models.stats import FundFlow, HistoricalFundFlow, MarketStat
 from .models.timeseries import MinuteBar, TransactionRecord
 from .transport.async_ import AsyncTdxConnection
-from .transport.sync import KNOWN_HOSTS, TdxConnection, ping_all
+from .transport.sync import CALC_HOSTS, KNOWN_HOSTS, TdxConnection, ping_all
 
 _DEFAULT_PORT = 7709
 _T = TypeVar("_T")
@@ -496,6 +504,84 @@ class TdxClient:
                 break
         return bytes(full_data)
 
+    @staticmethod
+    def _download_from_host(
+        host: str, filename: str, port: int = 7709, timeout: float = 15.0
+    ) -> bytes:
+        """从指定服务器创建临时连接并下载文件。"""
+        conn = TdxConnection(host, port, timeout)
+        try:
+            conn.connect()
+            full_data = bytearray()
+            pos = 0
+            chunk_size = 30000
+            while True:
+                chunk = conn.execute(GetReportFileCmd(filename, pos, chunk_size))
+                if not chunk:
+                    break
+                full_data.extend(chunk)
+                pos += len(chunk)
+                if len(chunk) < chunk_size:
+                    break
+            return bytes(full_data)
+        finally:
+            conn.close()
+
+    def get_financial_file_list(
+        self, host: str = CALC_HOSTS[0]
+    ) -> list[FinancialFileInfo]:
+        """获取可用的历史专业财报文件列表。
+
+        连接到计算服务器，下载 tdxfin/gpcw.txt 并解析。
+        """
+        data = self._download_from_host(host, "tdxfin/gpcw.txt")
+        raw_list = parse_financial_file_list(data)
+        return [FinancialFileInfo(filename=f, hash=h, filesize=s) for f, h, s in raw_list]
+
+    def get_financial_file(self, filename: str, host: str = CALC_HOSTS[0]) -> bytes:
+        """从计算服务器下载财报 zip 文件。
+
+        Args:
+            filename: 如 'tdxfin/gpcw20260331.zip'
+        """
+        return self._download_from_host(host, filename)
+
+    def get_financial_records(
+        self, filename: str, host: str = CALC_HOSTS[0]
+    ) -> list[FinancialRecord]:
+        """下载财报 zip 并解析为每只股票的记录列表。
+
+        Args:
+            filename: 如 'tdxfin/gpcw20260331.zip'
+        """
+        import io
+        import re
+        import zipfile
+
+        zip_data = self.get_financial_file(filename, host)
+        if not zip_data:
+            return []
+
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+            dat_names = [n for n in zf.namelist() if n.endswith(".dat")]
+            if not dat_names:
+                return []
+            dat_data = zf.read(dat_names[0])
+
+        m = re.search(r"(\d{8})", filename)
+        report_date = int(m.group(1)) if m else 0
+
+        raw_records = parse_financial_dat(dat_data, report_date)
+        records: list[FinancialRecord] = []
+        for code, market_byte, rdate, fields in raw_records:
+            market = Market.SH if market_byte == b"\x01" else Market.SZ
+            records.append(
+                FinancialRecord(
+                    code=code, market=market, report_date=rdate, fields=fields
+                )
+            )
+        return records
+
     def get_market_stat(self) -> MarketStat:
         """获取 A 股全市场涨跌统计概况（基于 880005 行情统计）。
 
@@ -922,6 +1008,75 @@ class AsyncTdxClient:
             if len(chunk) < chunk_size:
                 break
         return bytes(full_data)
+
+    @staticmethod
+    async def _async_download_from_host(
+        host: str, filename: str, port: int = 7709, timeout: float = 15.0
+    ) -> bytes:
+        """从指定服务器创建临时异步连接并下载文件。"""
+        conn = AsyncTdxConnection(host, port, timeout)
+        try:
+            await conn.connect()
+            full_data = bytearray()
+            pos = 0
+            chunk_size = 30000
+            while True:
+                chunk = await conn.execute(GetReportFileCmd(filename, pos, chunk_size))
+                if not chunk:
+                    break
+                full_data.extend(chunk)
+                pos += len(chunk)
+                if len(chunk) < chunk_size:
+                    break
+            return bytes(full_data)
+        finally:
+            await conn.close()
+
+    async def get_financial_file_list(
+        self, host: str = CALC_HOSTS[0]
+    ) -> list[FinancialFileInfo]:
+        """获取可用的历史专业财报文件列表（异步）。"""
+        data = await self._async_download_from_host(host, "tdxfin/gpcw.txt")
+        raw_list = parse_financial_file_list(data)
+        return [FinancialFileInfo(filename=f, hash=h, filesize=s) for f, h, s in raw_list]
+
+    async def get_financial_file(
+        self, filename: str, host: str = CALC_HOSTS[0]
+    ) -> bytes:
+        """从计算服务器下载财报 zip 文件（异步）。"""
+        return await self._async_download_from_host(host, filename)
+
+    async def get_financial_records(
+        self, filename: str, host: str = CALC_HOSTS[0]
+    ) -> list[FinancialRecord]:
+        """下载财报 zip 并解析为记录列表（异步）。"""
+        import io
+        import re
+        import zipfile
+
+        zip_data = await self.get_financial_file(filename, host)
+        if not zip_data:
+            return []
+
+        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf:
+            dat_names = [n for n in zf.namelist() if n.endswith(".dat")]
+            if not dat_names:
+                return []
+            dat_data = zf.read(dat_names[0])
+
+        m = re.search(r"(\d{8})", filename)
+        report_date = int(m.group(1)) if m else 0
+
+        raw_records = parse_financial_dat(dat_data, report_date)
+        records: list[FinancialRecord] = []
+        for code, market_byte, rdate, fields in raw_records:
+            market = Market.SH if market_byte == b"\x01" else Market.SZ
+            records.append(
+                FinancialRecord(
+                    code=code, market=market, report_date=rdate, fields=fields
+                )
+            )
+        return records
 
     async def get_market_stat(self) -> MarketStat:
         """获取 A 股全市场涨跌统计概况（基于 880005 行情统计）。

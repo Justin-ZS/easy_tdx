@@ -76,6 +76,11 @@ KNOWN_HOSTS: list[str] = [
     "111.231.113.208",
 ]
 
+# 计算服务器（用于下载 tdxfin/ 财务数据）
+CALC_HOSTS: list[str] = [
+    "120.76.152.87",
+]
+
 
 def ping_host(
     host: str,

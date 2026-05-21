@@ -129,6 +129,25 @@ class CompanyInfoCategory:
 
 
 @dataclass
+class FinancialFileInfo:
+    """财报 zip 文件索引条目（来自 tdxfin/gpcw.txt）。"""
+
+    filename: str    # "gpcw20260331.zip"
+    hash: str        # MD5 hex digest
+    filesize: int    # 字节
+
+
+@dataclass
+class FinancialRecord:
+    """单只股票的一期历史专业财报记录。"""
+
+    code: str              # 6 位股票代码
+    market: Market         # 市场
+    report_date: int       # 报告期 YYYYMMDD
+    fields: list[float]    # N 个浮点字段（N = report_size / 4）
+
+
+@dataclass
 class TdxBlock:
     """通达信板块信息（行业、概念、风格等）"""
 

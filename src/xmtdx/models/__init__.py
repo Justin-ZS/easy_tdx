@@ -4,6 +4,8 @@ from .finance import (
     XDXR_CATEGORY_NAMES,
     CompanyInfoCategory,
     FinanceInfo,
+    FinancialFileInfo,
+    FinancialRecord,
     XdxrRecord,
 )
 from .quote import SecurityQuote
@@ -22,4 +24,6 @@ __all__ = [
     "XDXR_CATEGORY_NAMES",
     "FinanceInfo",
     "CompanyInfoCategory",
+    "FinancialFileInfo",
+    "FinancialRecord",
 ]

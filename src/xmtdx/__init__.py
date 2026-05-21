@@ -21,11 +21,15 @@ asyncio 版本::
 """
 
 from .client import AsyncTdxClient, TdxClient
+from .ex.client import AsyncExTdxClient, ExTdxClient
+from .ex.models import KNOWN_EX_HOSTS
 from .exceptions import TdxCommandError, TdxConnectionError, TdxDecodeError, TdxError
 from .models import (
     XDXR_CATEGORY_NAMES,
     CompanyInfoCategory,
     FinanceInfo,
+    FinancialFileInfo,
+    FinancialRecord,
     KlineCategory,
     Market,
     MinuteBar,
@@ -35,9 +39,7 @@ from .models import (
     TransactionRecord,
     XdxrRecord,
 )
-from .ex.client import AsyncExTdxClient, ExTdxClient
-from .ex.models import KNOWN_EX_HOSTS
-from .transport.sync import KNOWN_HOSTS, ping_all
+from .transport.sync import CALC_HOSTS, KNOWN_HOSTS, ping_all
 
 __all__ = [
     # 客户端
@@ -56,6 +58,8 @@ __all__ = [
     "XDXR_CATEGORY_NAMES",
     "FinanceInfo",
     "CompanyInfoCategory",
+    "FinancialFileInfo",
+    "FinancialRecord",
     # 异常
     "TdxError",
     "TdxConnectionError",
@@ -68,6 +72,7 @@ __all__ = [
     # 工具
     "ping_all",
     "KNOWN_HOSTS",
+    "CALC_HOSTS",
 ]
 
 __version__ = "0.1.1"
