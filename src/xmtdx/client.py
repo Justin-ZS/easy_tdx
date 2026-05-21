@@ -1,7 +1,11 @@
 """高层行情 API：TdxClient（同步）和 AsyncTdxClient（asyncio）。"""
 
+import json
+import logging
 import asyncio
+from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import TypeVar
@@ -124,6 +128,43 @@ def _historical_fund_flow_from_records(
 # 同步客户端
 # ============================================================
 
+_CACHE_DIR = Path.home() / ".xmtdx" / "cache"
+_CACHE_MAX_AGE = 86400  # 1 天
+
+
+def _serialize_stocks(stocks: list[SecurityInfo]) -> list[dict]:
+    return [{k: v for k, v in asdict(s).items() if k != "_raw"} for s in stocks]
+
+
+def _deserialize_stocks(data: list[dict]) -> list[SecurityInfo]:
+    return [SecurityInfo(**{**d, "market": Market(d["market"])}) for d in data]
+
+
+def _load_cache() -> list[SecurityInfo] | None:
+    path = _CACHE_DIR / "security_list_all.json"
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+        updated = datetime.fromisoformat(raw["updated"])
+        if (datetime.now() - updated).total_seconds() > _CACHE_MAX_AGE:
+            return None
+        return _deserialize_stocks(raw["data"])
+    except Exception:
+        return None
+
+
+def _save_cache(stocks: list[SecurityInfo]) -> None:
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    data = {
+        "updated": datetime.now().isoformat(),
+        "count": len(stocks),
+        "data": _serialize_stocks(stocks),
+    }
+    (_CACHE_DIR / "security_list_all.json").write_text(
+        json.dumps(data, ensure_ascii=False), "utf-8"
+    )
+
 
 class TdxClient:
     """同步通达信行情客户端，支持 IP 优选与断线自动重连。
@@ -233,46 +274,68 @@ class TdxClient:
         """获取证券列表（每页约1000条，按 start 分页）。"""
         return self._execute(GetSecurityListCmd(market, start))
 
-    def get_security_list_all(self) -> list[SecurityInfo]:
+    def get_security_list_all(self, pages: int | str = "all") -> list[SecurityInfo]:
         """获取沪深 A 股完整证券列表，并自动挂载行业信息。
+
+        Args:
+            pages: 拉取页数。每个市场每页 1000 条。
+                   "all" 拉取全部（默认，结果会缓存到本地文件）。
+                   整数 N 表示每个市场只拉前 N 页，不缓存。
 
         注意：
             `Market.BJ` 的证券列表请求长期存在服务器超时问题，当前版本暂不纳入此方法。
-            若需 BJ 名单，应改由 `base_info.zip` 等文件离线解析获得。
         """
-        # 1. 尝试获取行业配置
-        industry_map = {}
+        log = logging.getLogger(__name__)
+
+        if pages == "all":
+            cached = _load_cache()
+            if cached is not None:
+                log.info("从缓存加载沪深 A 股列表，共 %d 只", len(cached))
+                return cached
+
+        # 计算每个市场的最大起始偏移
+        def _max_start(count: int) -> int:
+            if pages == "all":
+                return count
+            return min(count, int(pages) * 1000)
+
+        # 尝试获取行业配置
+        industry_map: dict[str, tuple[str, str]] = {}
         try:
             cfg_data = self.get_report_file("tdxhy.cfg")
             if cfg_data:
                 industry_map = parse_tdxhy_cfg(cfg_data)
+                log.info("行业配置已加载，共 %d 条映射", len(industry_map))
         except Exception:
-            pass
+            log.warning("无法获取 tdxhy.cfg，行业字段将为空")
 
         all_stocks: list[SecurityInfo] = []
-        # 注意：Market.BJ 证券列表请求常年超时，短期降级为仅 SH/SZ；
-        # BJ 列表需解析 base_info.zip 获得（待实现）。
         for market in [Market.SH, Market.SZ]:
             count = self.get_security_count(market)
-            for start in range(0, count, 1000):
-                stocks = self.get_security_list(market, start)
+            limit = _max_start(count)
+            total_pages = (limit + 999) // 1000
+            for page_idx, start in enumerate(range(0, limit, 1000)):
+                try:
+                    stocks = self.get_security_list(market, start)
+                except Exception:
+                    log.warning("%s 第 %d/%d 页获取失败，跳过", market.name, page_idx + 1, total_pages)
+                    continue
+                log.info("%s 第 %d/%d 页: %d 条", market.name, page_idx + 1, total_pages, len(stocks))
                 for s in stocks:
-                    # 精确 A 股过滤规则
-                    is_a_share = False
-                    if market == Market.SH:
-                        # 沪市 A 股：60xxxx, 68xxxx
-                        if s.code.startswith(("60", "68")):
-                            is_a_share = True
-                    elif market == Market.SZ:
-                        # 深市 A 股：00xxxx, 30xxxx
-                        if s.code.startswith(("00", "30")):
-                            is_a_share = True
-                    
+                    is_a_share = (
+                        (market == Market.SH and s.code.startswith(("60", "68")))
+                        or (market == Market.SZ and s.code.startswith(("00", "30")))
+                    )
                     if is_a_share:
-                        # 挂载行业信息
                         if s.code in industry_map:
                             s.industry_tdx, s.industry_sw = industry_map[s.code]
                         all_stocks.append(s)
+
+        log.info("沪深 A 股总数: %d", len(all_stocks))
+
+        if pages == "all":
+            _save_cache(all_stocks)
+
         return all_stocks
 
     def get_security_quotes(
@@ -440,15 +503,20 @@ class TdxClient:
             `suspended_count` 是 `total - up - down - neutral` 的残差估算值，
             用于保证计数守恒，不应视为协议已明确验证的停牌字段。
         """
-        # 通达信中 880005 是全市场行情统计代码
-        quotes = self.get_security_quotes([(Market.SH, "880005")])
+        # 通达信中 880005 是全市场行情统计，880001 是总市值指数，880006 是涨跌停统计
+        quotes = self.get_security_quotes([
+            (Market.SH, "880005"), (Market.SH, "880001"), (Market.SH, "880006"),
+        ])
         if not quotes:
             raise RuntimeError("无法获取市场统计数据")
         q = quotes[0]
         up = int(q.price)
-        down = int(q.pre_close)
+        down = int(q.open)
         neutral = int(q.low)
         total = int(q.high)
+        market_cap = quotes[1].price * 1e10 if len(quotes) > 1 else 0.0
+        limit_down = int(quotes[2].open) if len(quotes) > 2 else 0
+        limit_up = int(quotes[2].price) if len(quotes) > 2 else 0
         return MarketStat(
             up_count=up,
             down_count=down,
@@ -457,6 +525,9 @@ class TdxClient:
             total_count=total,
             total_amount=q.amount,
             total_volume=q.vol,
+            total_market_cap=market_cap,
+            limit_up_count=limit_up,
+            limit_down_count=limit_down,
         )
 
     def _collect_transaction_records(
@@ -668,41 +739,64 @@ class AsyncTdxClient:
     async def get_security_list(self, market: Market, start: int) -> list[SecurityInfo]:
         return await self._execute(GetSecurityListCmd(market, start))
 
-    async def get_security_list_all(self) -> list[SecurityInfo]:
+    async def get_security_list_all(self, pages: int | str = "all") -> list[SecurityInfo]:
         """获取沪深 A 股完整证券列表，并自动挂载行业信息。
+
+        Args:
+            pages: 拉取页数。每个市场每页 1000 条。
+                   "all" 拉取全部（默认，结果会缓存到本地文件）。
+                   整数 N 表示每个市场只拉前 N 页，不缓存。
 
         注意：
             `Market.BJ` 的证券列表请求长期存在服务器超时问题，当前版本暂不纳入此方法。
-            若需 BJ 名单，应改由 `base_info.zip` 等文件离线解析获得。
         """
-        industry_map = {}
+        log = logging.getLogger(__name__)
+
+        if pages == "all":
+            cached = _load_cache()
+            if cached is not None:
+                log.info("从缓存加载沪深 A 股列表，共 %d 只", len(cached))
+                return cached
+
+        def _max_start(count: int) -> int:
+            if pages == "all":
+                return count
+            return min(count, int(pages) * 1000)
+
+        industry_map: dict[str, tuple[str, str]] = {}
         try:
             cfg_data = await self.get_report_file("tdxhy.cfg")
             if cfg_data:
                 industry_map = parse_tdxhy_cfg(cfg_data)
+                log.info("行业配置已加载，共 %d 条映射", len(industry_map))
         except Exception:
-            pass
+            log.warning("无法获取 tdxhy.cfg，行业字段将为空")
 
         all_stocks: list[SecurityInfo] = []
-        # 注意：Market.BJ 证券列表请求常年超时，短期降级为仅 SH/SZ；
-        # BJ 列表需解析 base_info.zip 获得（待实现）。
         for market in [Market.SH, Market.SZ]:
             count = await self.get_security_count(market)
-            for start in range(0, count, 1000):
-                stocks = await self.get_security_list(market, start)
+            limit = _max_start(count)
+            total_pages = (limit + 999) // 1000
+            for page_idx, start in enumerate(range(0, limit, 1000)):
+                try:
+                    stocks = await self.get_security_list(market, start)
+                except Exception:
+                    log.warning("%s 第 %d/%d 页获取失败，跳过", market.name, page_idx + 1, total_pages)
+                    continue
+                log.info("%s 第 %d/%d 页: %d 条", market.name, page_idx + 1, total_pages, len(stocks))
                 for s in stocks:
-                    is_a_share = False
-                    if market == Market.SH:
-                        if s.code.startswith(("60", "68")):
-                            is_a_share = True
-                    elif market == Market.SZ:
-                        if s.code.startswith(("00", "30")):
-                            is_a_share = True
-                    
+                    is_a_share = (
+                        (market == Market.SH and s.code.startswith(("60", "68")))
+                        or (market == Market.SZ and s.code.startswith(("00", "30")))
+                    )
                     if is_a_share:
                         if s.code in industry_map:
                             s.industry_tdx, s.industry_sw = industry_map[s.code]
                         all_stocks.append(s)
+
+        log.info("沪深 A 股总数: %d", len(all_stocks))
+        if pages == "all":
+            _save_cache(all_stocks)
         return all_stocks
 
     async def get_security_quotes(
@@ -836,15 +930,20 @@ class AsyncTdxClient:
             `suspended_count` 是 `total - up - down - neutral` 的残差估算值，
             用于保证计数守恒，不应视为协议已明确验证的停牌字段。
         """
-        # 通达信中 880005 是全市场行情统计代码
-        quotes = await self.get_security_quotes([(Market.SH, "880005")])
+        # 通达信中 880005 是全市场行情统计，880001 是总市值指数，880006 是涨跌停统计
+        quotes = await self.get_security_quotes([
+            (Market.SH, "880005"), (Market.SH, "880001"), (Market.SH, "880006"),
+        ])
         if not quotes:
             raise RuntimeError("无法获取市场统计数据")
         q = quotes[0]
         up = int(q.price)
-        down = int(q.pre_close)
+        down = int(q.open)
         neutral = int(q.low)
         total = int(q.high)
+        market_cap = quotes[1].price * 1e10 if len(quotes) > 1 else 0.0
+        limit_down = int(quotes[2].open) if len(quotes) > 2 else 0
+        limit_up = int(quotes[2].price) if len(quotes) > 2 else 0
         return MarketStat(
             up_count=up,
             down_count=down,
@@ -853,6 +952,9 @@ class AsyncTdxClient:
             total_count=total,
             total_amount=q.amount,
             total_volume=q.vol,
+            total_market_cap=market_cap,
+            limit_up_count=limit_up,
+            limit_down_count=limit_down,
         )
 
     async def _collect_transaction_records(

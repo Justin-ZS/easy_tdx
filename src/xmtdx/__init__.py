@@ -35,6 +35,8 @@ from .models import (
     TransactionRecord,
     XdxrRecord,
 )
+from .ex.client import AsyncExTdxClient, ExTdxClient
+from .ex.models import KNOWN_EX_HOSTS
 from .transport.sync import KNOWN_HOSTS, ping_all
 
 __all__ = [
@@ -59,6 +61,10 @@ __all__ = [
     "TdxConnectionError",
     "TdxDecodeError",
     "TdxCommandError",
+    # 扩展行情
+    "ExTdxClient",
+    "AsyncExTdxClient",
+    "KNOWN_EX_HOSTS",
     # 工具
     "ping_all",
     "KNOWN_HOSTS",

@@ -12,6 +12,9 @@ class MarketStat:
     total_count: int        # 总计（包含停牌）
     total_amount: float     # 总成交额
     total_volume: float     # 总成交量
+    total_market_cap: float # 总市值（亿元），来自 880001 收盘价，÷100 得万亿
+    limit_up_count: int     # 涨停家数，来自 880006 close
+    limit_down_count: int   # 跌停家数，来自 880006 open
 
 
 @dataclass

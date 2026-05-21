@@ -103,8 +103,55 @@ class GetSecurityBarsCmd(BaseCommand[list[SecurityBar]]):
 
 
 class GetIndexBarsCmd(GetSecurityBarsCmd):
-    """获取指数 K 线（请求格式与股票 K 线相同，服务器端按指数逻辑处理）。
+    """获取指数 K 线。
 
-    实际上通达信服务器对股票代码前缀自动判断指数/股票，
-    此子类仅作语义区分，无额外逻辑。
+    请求格式与股票 K 线相同，但响应每条记录在 vol+amt 后多 4 字节
+    （上涨家数 uint16 + 下跌家数 uint16），必须跳过否则后续记录错位。
     """
+
+    def parse_response(self, body: bytes) -> list[SecurityBar]:
+        (ret_count,) = unpack_from("<H", body, 0, "security_bars header")
+        pos = 2
+        bars: list[SecurityBar] = []
+        pre_diff_base = 0
+        cat = int(self.category)
+
+        for _ in range(ret_count):
+            record_start = pos
+            year, month, day, hour, minute, pos = get_datetime(cat, body, pos)
+
+            open_diff, pos = get_price(body, pos)
+            close_diff, pos = get_price(body, pos)
+            high_diff, pos = get_price(body, pos)
+            low_diff, pos = get_price(body, pos)
+
+            vol, pos = get_volume(body, pos)
+            amount, pos = get_volume(body, pos)
+
+            # 指数记录额外 4 字节：上涨家数 + 下跌家数（各 uint16 LE）
+            pos += 4
+
+            open_abs = open_diff + pre_diff_base
+            close_abs = open_abs + close_diff
+            high_abs = open_abs + high_diff
+            low_abs = open_abs + low_diff
+            pre_diff_base = open_abs + close_diff
+
+            bars.append(
+                SecurityBar(
+                    open=open_abs / 1000.0,
+                    close=close_abs / 1000.0,
+                    high=high_abs / 1000.0,
+                    low=low_abs / 1000.0,
+                    vol=vol,
+                    amount=amount,
+                    year=year,
+                    month=month,
+                    day=day,
+                    hour=hour,
+                    minute=minute,
+                    _raw=body[record_start:pos],
+                )
+            )
+
+        return bars
