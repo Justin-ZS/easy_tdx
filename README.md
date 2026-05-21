@@ -2,14 +2,11 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-通达信 TCP 协议行情数据客户端，零运行时依赖。支持在线行情获取和离线本地数据读取。
+通达信（tdx）是中国使用最广泛的券商行情终端之一，其私有 TCP 协议长期缺乏官方 SDK。[pytdx](https://github.com/rainx/pytdx) 率先完成了协议逆向与离线数据读取，为整个生态奠定了基础；[mootdx](https://github.com/mootdx/mootdx) 在此之上做了工程化封装，让更多开发者得以使用；[xmtdx](https://github.com/minionszyw/xmtdx) 进一步探索了现代 Python 接口设计。
 
-easy-tdx 是从 [xmtdx](https://github.com/minionszyw/xmtdx) 项目独立出来的全新版本，在线协议实现经过大幅重写并修复了大量解析 bug，同时新增了扩展行情、离线数据读取、专业财务数据等完整功能模块。
+easy-tdx 站在这些项目的肩膀上，从协议层重新实现：LEB128 价格编解码、自定义浮点成交量、帧解压缩与握手——每一层都有对应的离线 fixture 测试。commands 层不含 IO，与 transport 完全解耦；同步 + asyncio 双接口；strict mypy 通过；零运行时依赖；每条记录保留原始字节。覆盖标准行情、扩展市场（期货/港股/外盘）、离线本地数据读取、专业财务数据全场景。
 
-本项目深受以下开源项目启发，感谢它们的贡献：
-
-- [pytdx](https://github.com/rainx/pytdx) — 离线数据读取模块（日线、分钟线、板块、股本变迁、历史财务的文件格式解析方法）借鉴自 pytdx
-- [xmtdx](https://github.com/minionszyw/xmtdx) — 初始项目结构和在线协议实现的原型
+感谢 rainx、mootdx 社区及 minionszyw 的开创性工作——没有他们，就不会有这个项目。
 
 详见 [NOTICE](NOTICE) 和 [LICENSE](LICENSE) 文件。
 
