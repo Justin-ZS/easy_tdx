@@ -295,7 +295,12 @@ easy-tdx backtest SZ 300308 --strategy-file strategies/expma_cross.py --count 20
 
 ```bash
 python -X utf8 run_all_strategies.py SZ 300308 --count 2000 --cash 1000000 --adjust QFQ
+
+# 加 --show 自动弹出最佳策略的资金曲线 vs 股价对比图
+python -X utf8 run_all_strategies.py SZ 300308 --count 2000 --cash 1000000 --adjust QFQ --show
 ```
+
+`--show` 会用 matplotlib 弹出一个双轴对比窗口：左轴蓝色线是归一化股价，右轴红色线是最佳策略的资金曲线，绿三角=买入、黄三角=卖出，标题显示股票名称和关键绩效指标。需要 `pip install matplotlib`。
 
 输出示例（以 SZ 300308 为例）：
 
@@ -344,6 +349,25 @@ python -X utf8 run_all_strategies.py SZ 300308 --count 2000 --cash 1000000 --adj
 # 贵州茅台
 python -X utf8 run_all_strategies.py SH 600519 --count 2000 --cash 1000000 --adjust QFQ
 ```
+
+#### `--show` 可视化效果
+
+<p align="center">
+  <img src="strategies/demo/1.png" width="700"><br>
+  <sub>SH601088 中国神华 — bollinger_breakout 策略 | 收益 1281.8%</sub>
+</p>
+
+<p align="center">
+  <img src="strategies/demo/2.png" width="700"><br>
+  <sub>SH600522 中天科技 — kdj_golden 策略 | 收益 568.6%</sub>
+</p>
+
+<p align="center">
+  <img src="strategies/demo/3.png" width="700"><br>
+  <sub>SH601179 中国西电 — expma_cross 策略 | 收益 168.0%</sub>
+</p>
+
+> **⚠️ Demo 展示，不作为操作依据。** 历史回测收益不代表未来表现，策略参数未经过样本外验证。
 
 #### 自带策略示例
 
