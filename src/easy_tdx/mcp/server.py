@@ -136,8 +136,7 @@ def create_server() -> FastMCP:
     @mcp.tool(
         name="a_share_sector_ranking",
         description=(
-            "Fetch aggregated A-share sector ranking; top_n defaults to 30 "
-            "and maxes at 100."
+            "Fetch aggregated A-share sector ranking; top_n defaults to 30 and maxes at 100."
         ),
     )
     def a_share_sector_ranking(
