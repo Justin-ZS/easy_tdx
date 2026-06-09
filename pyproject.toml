@@ -12,10 +12,12 @@ dependencies = ["pandas>=2.0", "tzdata>=2024.1", "click>=8.0"]
 
 [project.scripts]
 easy-tdx = "easy_tdx.cli:cli"  # cli/__init__.py exposes the click group
+easy-tdx-mcp = "easy_tdx.mcp.server:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "pytest-cov", "mypy>=1.9", "ruff>=0.4"]
 web = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+mcp = ["fastmcp>=2.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/easy_tdx"]
