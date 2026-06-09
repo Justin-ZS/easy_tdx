@@ -64,6 +64,72 @@ pip install -e ".[dev]"
 pip install -e ".[web]"
 ```
 
+安装 MCP server 依赖：
+
+```bash
+pip install -e ".[mcp]"
+```
+
+## MCP Server
+
+`easy-tdx-mcp` 通过 stdio 启动，适合配置给 Claude、Codex 或其他本地 Agent：
+
+```bash
+easy-tdx-mcp
+```
+
+开发环境可一次安装 MCP 和测试依赖：
+
+```bash
+pip install -e ".[mcp,dev]"
+```
+
+示例 Agent 配置：
+
+```json
+{
+  "mcpServers": {
+    "easy-tdx": {
+      "command": "easy-tdx-mcp"
+    }
+  }
+}
+```
+
+第一版 MCP 只做实时数据获取，不做名称搜索、代码搜索、交易下单或投资建议。A 股裸 6 位代码不自动猜市场，需使用 `SH600519`、`SZ000001` 或 `market/code`；港股裸代码默认主板，例如 `00700` 等同于 `HK_MAIN_BOARD 00700`。
+
+可用工具：
+
+| 工具 | 用途 |
+|------|------|
+| `service_health` | 返回版本、transport 和可用 client 信息，不触网 |
+| `a_share_realtime_quotes` | A 股一只或多只实时行情，最多 80 只 |
+| `a_share_kline_bars` | A 股 K 线，默认 200 行，最多 1000 行 |
+| `a_share_intraday_timeseries` | A 股单日或最多 5 日分时 |
+| `a_share_trade_ticks` | A 股逐笔成交，默认 200 行，最多 1000 行 |
+| `a_share_sector_list` | A 股板块列表 |
+| `a_share_sector_members` | A 股板块成分股实时行情 |
+| `a_share_sector_ranking` | A 股板块排行，默认 top 30，最多 top 100 |
+| `a_share_market_events` | A 股市场异动，默认 100 条，最多 600 条 |
+| `a_share_market_snapshot` | A 股市场涨跌家数、成交额、市值等统计快照 |
+| `hk_realtime_quotes` | 港股一只或多只实时行情，最多 80 只 |
+| `hk_kline_bars` | 港股 K 线，默认 200 行，最多 1000 行 |
+| `hk_intraday_timeseries` | 港股单日分时 |
+
+工具返回统一 envelope：
+
+```json
+{
+  "ok": true,
+  "source": "easy_tdx",
+  "query": {"symbol": "SH600519", "count": 200},
+  "count": 1,
+  "rows": [{"code": "600519", "price": 123.45}]
+}
+```
+
+超限、市场错误、代码歧义或网络异常会返回 `ok=false` 和结构化 `error.code`，不会静默截断大请求。
+
 ## CLI 参考
 
 `easy-tdx` 默认输出 JSON（一行一条记录），`--table` 切换表格，`--output csv` 输出 CSV。
