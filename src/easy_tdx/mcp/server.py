@@ -34,6 +34,32 @@ def create_server() -> FastMCP:
     ) -> dict[str, Any]:
         return facade.a_share_realtime_quotes(symbols=symbols, market=market, code=code)
 
+    @mcp.tool(
+        name="a_share_kline_bars",
+        description=(
+            "Fetch A-share K-line bars for one known symbol. Use symbol like SH600519 "
+            "or provide market/code. count defaults to 200 and maxes at 1000."
+        ),
+    )
+    def a_share_kline_bars(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        period: str = "DAILY",
+        count: int | None = 200,
+        start: int = 0,
+        adjust: str = "NONE",
+    ) -> dict[str, Any]:
+        return facade.a_share_kline_bars(
+            symbol=symbol,
+            market=market,
+            code=code,
+            period=period,
+            count=count,
+            start=start,
+            adjust=adjust,
+        )
+
     return mcp
 
 

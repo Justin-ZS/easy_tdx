@@ -16,14 +16,45 @@ import pandas as pd  # type: ignore[import-untyped]
 from easy_tdx import __version__ as module_version
 from easy_tdx.exceptions import TdxError
 from easy_tdx.mac.client import MacClient
+from easy_tdx.mac.enums import Adjust, Period
 from easy_tdx.models.enums import Market
 
 _PACKAGE_NAME = "easy-tdx"
+_DEFAULT_ROW_LIMIT = 200
+_MAX_ROW_LIMIT = 1000
 _MAX_QUOTE_SYMBOLS = 80
 _A_SHARE_MARKETS = {
     "SH": Market.SH,
     "SZ": Market.SZ,
     "BJ": Market.BJ,
+}
+_PERIOD_ALIASES = {
+    "1MIN": Period.MIN_1,
+    "MIN1": Period.MIN_1,
+    "MIN_1": Period.MIN_1,
+    "5MIN": Period.MIN_5,
+    "MIN5": Period.MIN_5,
+    "MIN_5": Period.MIN_5,
+    "15MIN": Period.MIN_15,
+    "MIN15": Period.MIN_15,
+    "MIN_15": Period.MIN_15,
+    "30MIN": Period.MIN_30,
+    "MIN30": Period.MIN_30,
+    "MIN_30": Period.MIN_30,
+    "60MIN": Period.MIN_60,
+    "MIN60": Period.MIN_60,
+    "MIN_60": Period.MIN_60,
+    "DAY": Period.DAILY,
+    "DAILY": Period.DAILY,
+    "WEEK": Period.WEEKLY,
+    "WEEKLY": Period.WEEKLY,
+    "MONTH": Period.MONTHLY,
+    "MONTHLY": Period.MONTHLY,
+}
+_ADJUST_ALIASES = {
+    "NONE": Adjust.NONE,
+    "QFQ": Adjust.QFQ,
+    "HFQ": Adjust.HFQ,
 }
 
 class QuoteClient(Protocol):
@@ -40,6 +71,17 @@ class QuoteClient(Protocol):
         self,
         stocks: list[tuple[int, str]],
         fields: object = None,
+    ) -> pd.DataFrame: ...
+
+    def get_stock_kline(
+        self,
+        market: int,
+        code: str,
+        period: Period = Period.DAILY,
+        start: int = 0,
+        count: int = 800,
+        times: int = 1,
+        adjust: Adjust = Adjust.NONE,
     ) -> pd.DataFrame: ...
 
 
@@ -130,6 +172,63 @@ def _split_symbol(symbol: str) -> tuple[str | None, str]:
     return None, cleaned
 
 
+def _coerce_positive_limit(
+    value: int | None,
+    *,
+    default: int = _DEFAULT_ROW_LIMIT,
+    maximum: int = _MAX_ROW_LIMIT,
+    query: dict[str, Any],
+) -> tuple[int | None, dict[str, Any] | None]:
+    count = default if value is None else value
+    if count <= 0:
+        return None, error_envelope(
+            "INVALID_LIMIT",
+            "count must be positive",
+            query=query,
+            details={"count": count},
+        )
+    if count > maximum:
+        return None, error_envelope(
+            "LIMIT_EXCEEDED",
+            f"count supports at most {maximum} rows",
+            query=query,
+            details={"max": maximum, "actual": count},
+        )
+    return count, None
+
+
+def _parse_period(
+    value: str,
+    *,
+    query: dict[str, Any],
+) -> tuple[Period | None, dict[str, Any] | None]:
+    key = value.strip().upper().replace("-", "_")
+    if key in _PERIOD_ALIASES:
+        return _PERIOD_ALIASES[key], None
+    return None, error_envelope(
+        "INVALID_PERIOD",
+        "unsupported period",
+        query=query,
+        details={"period": value, "supported": sorted(_PERIOD_ALIASES)},
+    )
+
+
+def _parse_adjust(
+    value: str,
+    *,
+    query: dict[str, Any],
+) -> tuple[Adjust | None, dict[str, Any] | None]:
+    key = value.strip().upper()
+    if key in _ADJUST_ALIASES:
+        return _ADJUST_ALIASES[key], None
+    return None, error_envelope(
+        "INVALID_ADJUST",
+        "adjust must be NONE, QFQ, or HFQ",
+        query=query,
+        details={"adjust": value},
+    )
+
+
 def _normalize_a_share_symbols(
     *,
     symbols: list[str] | None = None,
@@ -215,6 +314,77 @@ def a_share_realtime_quotes(
 
     rows = dataframe_rows(df)
     return envelope(source="easy_tdx", query=query, rows=rows)
+
+
+def a_share_kline_bars(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    period: str = "DAILY",
+    count: int | None = _DEFAULT_ROW_LIMIT,
+    start: int = 0,
+    adjust: str = "NONE",
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch A-share K-line bars for a known symbol."""
+    query = {
+        "symbol": symbol,
+        "market": market,
+        "code": code,
+        "period": period,
+        "count": count,
+        "start": start,
+        "adjust": adjust,
+    }
+    if start < 0:
+        return error_envelope(
+            "INVALID_OFFSET",
+            "start must be non-negative",
+            query=query,
+            details={"start": start},
+        )
+    symbols = [symbol] if symbol else None
+    normalized, error = _normalize_a_share_symbols(symbols=symbols, market=market, code=code)
+    if error is not None:
+        return error
+    assert normalized is not None
+    if len(normalized) != 1:
+        return error_envelope(
+            "INVALID_SYMBOL",
+            "K-line query requires exactly one A-share symbol",
+            query=query,
+        )
+    limit, error = _coerce_positive_limit(count, query=query)
+    if error is not None:
+        return error
+    assert limit is not None
+    parsed_period, error = _parse_period(period, query=query)
+    if error is not None:
+        return error
+    assert parsed_period is not None
+    parsed_adjust, error = _parse_adjust(adjust, query=query)
+    if error is not None:
+        return error
+    assert parsed_adjust is not None
+    market_id, parsed_code = normalized[0]
+
+    try:
+        with client_factory() as client:
+            df = client.get_stock_kline(
+                market_id,
+                parsed_code,
+                period=parsed_period,
+                start=start,
+                count=limit,
+                adjust=parsed_adjust,
+            )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
 
 
 def service_health() -> dict[str, Any]:
