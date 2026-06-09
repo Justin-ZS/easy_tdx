@@ -525,6 +525,13 @@ def test_a_share_market_events_facade() -> None:
     assert fake.board_args == {"market": int(Market.SZ), "start": 5, "count": 50}
 
 
+def test_a_share_market_events_enforces_limit() -> None:
+    result = facade.a_share_market_events(market="SH", count=601)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "LIMIT_EXCEEDED"
+
+
 def test_a_share_market_snapshot_facade() -> None:
     result = facade.a_share_market_snapshot(client_factory=FakeTdxClient)
 
@@ -554,6 +561,13 @@ def test_hk_realtime_quotes_enforces_symbol_limit() -> None:
 
     assert result["ok"] is False
     assert result["error"]["code"] == "LIMIT_EXCEEDED"
+
+
+def test_hk_realtime_quotes_rejects_unknown_market() -> None:
+    result = facade.hk_realtime_quotes(market="US_STOCK", code="AAPL")
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_MARKET"
 
 
 def test_hk_kline_bars_facade() -> None:
@@ -599,6 +613,26 @@ def test_hk_intraday_timeseries_rejects_bad_date() -> None:
 
     assert result["ok"] is False
     assert result["error"]["code"] == "INVALID_DATE"
+
+
+def test_tool_exception_uses_error_envelope_without_traceback() -> None:
+    class RaisingQuoteClient(FakeMacClient):
+        def get_stock_quotes(
+            self,
+            stocks: list[tuple[int, str]],
+            fields: object = None,
+        ) -> pd.DataFrame:
+            raise RuntimeError("boom")
+
+    result = facade.a_share_realtime_quotes(
+        symbols=["SH600519"],
+        client_factory=RaisingQuoteClient,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "TOOL_ERROR"
+    assert result["error"]["message"] == "boom"
+    assert "Traceback" not in result["error"]["message"]
 
 
 def test_service_health_tool_registered() -> None:
