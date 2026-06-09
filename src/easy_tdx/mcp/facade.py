@@ -9,25 +9,47 @@ from __future__ import annotations
 from collections.abc import Callable
 from importlib.metadata import PackageNotFoundError, version
 from types import TracebackType
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import pandas as pd  # type: ignore[import-untyped]
 
 from easy_tdx import __version__ as module_version
 from easy_tdx.exceptions import TdxError
 from easy_tdx.mac.client import MacClient
-from easy_tdx.mac.enums import Adjust, Period
+from easy_tdx.mac.enums import Adjust, BoardType, Period, SortOrder, SortType
 from easy_tdx.models.enums import Market
 
 _PACKAGE_NAME = "easy-tdx"
 _DEFAULT_ROW_LIMIT = 200
 _MAX_ROW_LIMIT = 1000
 _MAX_QUOTE_SYMBOLS = 80
+_DEFAULT_RANKING_LIMIT = 30
+_MAX_RANKING_LIMIT = 100
+_DEFAULT_EVENT_LIMIT = 100
+_MAX_EVENT_LIMIT = 600
 _A_SHARE_MARKETS = {
     "SH": Market.SH,
     "SZ": Market.SZ,
     "BJ": Market.BJ,
 }
+_SECTOR_TYPE_ALIASES = {
+    "ALL": BoardType.ALL,
+    "INDUSTRY": BoardType.HY,
+    "INDUSTRY_LEVEL1": BoardType.HY,
+    "INDUSTRY_LEVEL2": BoardType.HY2,
+    "CONCEPT": BoardType.GN,
+    "STYLE": BoardType.FG,
+    "REGION": BoardType.DQ,
+}
+_MEMBER_SORT_ALIASES = {
+    "CHANGE_PCT": SortType.CHANGE_PCT,
+    "AMOUNT": SortType.TOTAL_AMOUNT,
+    "TOTAL_AMOUNT": SortType.TOTAL_AMOUNT,
+    "VOLUME": SortType.VOLUME,
+    "CODE": SortType.CODE,
+    "PRICE": SortType.PRICE,
+}
+_RANKING_SORT_FIELDS = {"change_pct", "amount", "main_net_amount", "vol"}
 _PERIOD_ALIASES = {
     "1MIN": Period.MIN_1,
     "MIN1": Period.MIN_1,
@@ -56,6 +78,7 @@ _ADJUST_ALIASES = {
     "QFQ": Adjust.QFQ,
     "HFQ": Adjust.HFQ,
 }
+
 
 class QuoteClient(Protocol):
     def __enter__(self) -> QuoteClient: ...
@@ -106,6 +129,37 @@ class QuoteClient(Protocol):
         count: int = 2000,
         start: int = 0,
         date: int | None = None,
+    ) -> pd.DataFrame: ...
+
+    def get_board_list(
+        self,
+        board_type: BoardType = BoardType.ALL,
+        count: int = 10000,
+    ) -> pd.DataFrame: ...
+
+    def get_board_members(
+        self,
+        board_symbol: str,
+        count: int = 100000,
+        sort_type: SortType = SortType.CHANGE_PCT,
+        sort_order: SortOrder = SortOrder.DESC,
+        fields: object = None,
+        exclude_flags: list[object] | None = None,
+    ) -> pd.DataFrame: ...
+
+    def get_board_ranking(
+        self,
+        board_type: BoardType = BoardType.HY,
+        top_n: int = 50,
+        sort_by: str = "change_pct",
+        ascending: bool = False,
+    ) -> pd.DataFrame: ...
+
+    def get_unusual(
+        self,
+        market: int,
+        start: int = 0,
+        count: int = 0,
     ) -> pd.DataFrame: ...
 
 
@@ -253,6 +307,54 @@ def _parse_adjust(
     )
 
 
+def _parse_a_share_market(
+    value: str,
+    *,
+    query: dict[str, Any],
+) -> tuple[int | None, dict[str, Any] | None]:
+    key = value.strip().upper()
+    if key in _A_SHARE_MARKETS:
+        return int(_A_SHARE_MARKETS[key]), None
+    return None, error_envelope(
+        "INVALID_MARKET",
+        "A-share market must be SH, SZ, or BJ",
+        query=query,
+        details={"market": value},
+    )
+
+
+def _parse_sector_type(
+    value: str,
+    *,
+    query: dict[str, Any],
+) -> tuple[BoardType | None, dict[str, Any] | None]:
+    key = value.strip().upper().replace("-", "_")
+    if key in _SECTOR_TYPE_ALIASES:
+        return _SECTOR_TYPE_ALIASES[key], None
+    return None, error_envelope(
+        "INVALID_SECTOR_TYPE",
+        "unsupported A-share sector type",
+        query=query,
+        details={"sector_type": value, "supported": sorted(_SECTOR_TYPE_ALIASES)},
+    )
+
+
+def _parse_member_sort_type(
+    value: str,
+    *,
+    query: dict[str, Any],
+) -> tuple[SortType | None, dict[str, Any] | None]:
+    key = value.strip().upper().replace("-", "_")
+    if key in _MEMBER_SORT_ALIASES:
+        return _MEMBER_SORT_ALIASES[key], None
+    return None, error_envelope(
+        "INVALID_SORT",
+        "unsupported A-share sector member sort field",
+        query=query,
+        details={"sort_by": value, "supported": sorted(_MEMBER_SORT_ALIASES)},
+    )
+
+
 def _normalize_single_a_share_symbol(
     *,
     symbol: str | None = None,
@@ -332,8 +434,8 @@ def _normalize_a_share_symbols(
     return normalized, None
 
 
-def _default_mac_client_factory() -> MacClient:
-    return MacClient.from_best_host()
+def _default_mac_client_factory() -> QuoteClient:
+    return cast(QuoteClient, MacClient.from_best_host())
 
 
 def a_share_realtime_quotes(
@@ -511,6 +613,163 @@ def a_share_trade_ticks(
                 start=start,
                 date=date,
             )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def a_share_sector_list(
+    *,
+    sector_type: str = "all",
+    count: int | None = _DEFAULT_ROW_LIMIT,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch A-share sector definitions."""
+    query = {"sector_type": sector_type, "count": count}
+    limit, error = _coerce_positive_limit(count, query=query)
+    if error is not None:
+        return error
+    assert limit is not None
+    parsed_type, error = _parse_sector_type(sector_type, query=query)
+    if error is not None:
+        return error
+    assert parsed_type is not None
+    try:
+        with client_factory() as client:
+            df = client.get_board_list(board_type=parsed_type, count=limit)
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def a_share_sector_members(
+    *,
+    sector_symbol: str,
+    count: int | None = _DEFAULT_ROW_LIMIT,
+    sort_by: str = "change_pct",
+    ascending: bool = False,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch realtime quotes for members in one A-share sector."""
+    query = {
+        "sector_symbol": sector_symbol,
+        "count": count,
+        "sort_by": sort_by,
+        "ascending": ascending,
+    }
+    if not sector_symbol.strip():
+        return error_envelope("INVALID_SYMBOL", "sector_symbol is required", query=query)
+    limit, error = _coerce_positive_limit(count, query=query)
+    if error is not None:
+        return error
+    assert limit is not None
+    parsed_sort, error = _parse_member_sort_type(sort_by, query=query)
+    if error is not None:
+        return error
+    assert parsed_sort is not None
+    sort_order = SortOrder.ASC if ascending else SortOrder.DESC
+    try:
+        with client_factory() as client:
+            df = client.get_board_members(
+                sector_symbol.strip(),
+                count=limit,
+                sort_type=parsed_sort,
+                sort_order=sort_order,
+            )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def a_share_sector_ranking(
+    *,
+    sector_type: str = "industry",
+    top_n: int | None = _DEFAULT_RANKING_LIMIT,
+    sort_by: str = "change_pct",
+    ascending: bool = False,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch aggregated A-share sector ranking."""
+    query = {
+        "sector_type": sector_type,
+        "top_n": top_n,
+        "sort_by": sort_by,
+        "ascending": ascending,
+    }
+    limit, error = _coerce_positive_limit(
+        top_n,
+        default=_DEFAULT_RANKING_LIMIT,
+        maximum=_MAX_RANKING_LIMIT,
+        query=query,
+    )
+    if error is not None:
+        return error
+    assert limit is not None
+    parsed_type, error = _parse_sector_type(sector_type, query=query)
+    if error is not None:
+        return error
+    assert parsed_type is not None
+    normalized_sort = sort_by.strip().lower()
+    if normalized_sort not in _RANKING_SORT_FIELDS:
+        return error_envelope(
+            "INVALID_SORT",
+            "unsupported A-share sector ranking sort field",
+            query=query,
+            details={"sort_by": sort_by, "supported": sorted(_RANKING_SORT_FIELDS)},
+        )
+    try:
+        with client_factory() as client:
+            df = client.get_board_ranking(
+                board_type=parsed_type,
+                top_n=limit,
+                sort_by=normalized_sort,
+                ascending=ascending,
+            )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def a_share_market_events(
+    *,
+    market: str = "SH",
+    start: int = 0,
+    count: int | None = _DEFAULT_EVENT_LIMIT,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch A-share unusual market events."""
+    query = {"market": market, "start": start, "count": count}
+    if start < 0:
+        return error_envelope(
+            "INVALID_OFFSET",
+            "start must be non-negative",
+            query=query,
+            details={"start": start},
+        )
+    limit, error = _coerce_positive_limit(
+        count,
+        default=_DEFAULT_EVENT_LIMIT,
+        maximum=_MAX_EVENT_LIMIT,
+        query=query,
+    )
+    if error is not None:
+        return error
+    assert limit is not None
+    market_id, error = _parse_a_share_market(market, query=query)
+    if error is not None:
+        return error
+    assert market_id is not None
+    try:
+        with client_factory() as client:
+            df = client.get_unusual(market_id, start=start, count=limit)
     except TdxError as exc:
         return error_envelope("TDX_ERROR", str(exc), query=query)
     except Exception as exc:

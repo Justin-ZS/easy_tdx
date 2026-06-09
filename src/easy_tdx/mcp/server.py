@@ -103,6 +103,67 @@ def create_server() -> FastMCP:
             count=count,
         )
 
+    @mcp.tool(
+        name="a_share_sector_list",
+        description="Fetch A-share sector definitions by sector type.",
+    )
+    def a_share_sector_list(
+        sector_type: str = "all",
+        count: int | None = 200,
+    ) -> dict[str, Any]:
+        return facade.a_share_sector_list(sector_type=sector_type, count=count)
+
+    @mcp.tool(
+        name="a_share_sector_members",
+        description=(
+            "Fetch realtime quote rows for members in one A-share sector. "
+            "Use a known sector symbol such as 881001."
+        ),
+    )
+    def a_share_sector_members(
+        sector_symbol: str,
+        count: int | None = 200,
+        sort_by: str = "change_pct",
+        ascending: bool = False,
+    ) -> dict[str, Any]:
+        return facade.a_share_sector_members(
+            sector_symbol=sector_symbol,
+            count=count,
+            sort_by=sort_by,
+            ascending=ascending,
+        )
+
+    @mcp.tool(
+        name="a_share_sector_ranking",
+        description=(
+            "Fetch aggregated A-share sector ranking; top_n defaults to 30 "
+            "and maxes at 100."
+        ),
+    )
+    def a_share_sector_ranking(
+        sector_type: str = "industry",
+        top_n: int | None = 30,
+        sort_by: str = "change_pct",
+        ascending: bool = False,
+    ) -> dict[str, Any]:
+        return facade.a_share_sector_ranking(
+            sector_type=sector_type,
+            top_n=top_n,
+            sort_by=sort_by,
+            ascending=ascending,
+        )
+
+    @mcp.tool(
+        name="a_share_market_events",
+        description="Fetch A-share unusual market events for SH, SZ, or BJ.",
+    )
+    def a_share_market_events(
+        market: str = "SH",
+        start: int = 0,
+        count: int | None = 100,
+    ) -> dict[str, Any]:
+        return facade.a_share_market_events(market=market, start=start, count=count)
+
     return mcp
 
 

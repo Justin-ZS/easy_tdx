@@ -5,7 +5,7 @@ import asyncio
 import pandas as pd  # type: ignore[import-untyped]
 from fastmcp import Client
 
-from easy_tdx.mac.enums import Adjust, Period
+from easy_tdx.mac.enums import Adjust, BoardType, Period, SortOrder, SortType
 from easy_tdx.mcp import facade
 from easy_tdx.mcp.facade import service_health
 from easy_tdx.mcp.server import create_server
@@ -15,8 +15,10 @@ from easy_tdx.models.enums import Market
 class FakeMacClient:
     def __init__(self) -> None:
         self.stocks: list[tuple[int, str]] | None = None
+        self.kline_args: dict[str, object] | None = None
         self.tick_args: dict[str, object] | None = None
         self.trade_args: dict[str, object] | None = None
+        self.board_args: dict[str, object] | None = None
 
     def __enter__(self) -> FakeMacClient:
         return self
@@ -137,6 +139,98 @@ class FakeMacClient:
             ]
         )
 
+    def get_board_list(
+        self,
+        board_type: BoardType = BoardType.ALL,
+        count: int = 10000,
+    ) -> pd.DataFrame:
+        self.board_args = {"board_type": board_type, "count": count}
+        return pd.DataFrame(
+            [
+                {
+                    "code": "881001",
+                    "name": "sample sector",
+                    "price": 100.0,
+                }
+            ]
+        )
+
+    def get_board_members(
+        self,
+        board_symbol: str,
+        count: int = 100000,
+        sort_type: SortType = SortType.CHANGE_PCT,
+        sort_order: SortOrder = SortOrder.DESC,
+        fields: object = None,
+        exclude_flags: list[object] | None = None,
+    ) -> pd.DataFrame:
+        self.board_args = {
+            "board_symbol": board_symbol,
+            "count": count,
+            "sort_type": sort_type,
+            "sort_order": sort_order,
+            "fields": fields,
+            "exclude_flags": exclude_flags,
+        }
+        return pd.DataFrame(
+            [
+                {
+                    "market": int(Market.SH),
+                    "code": "600519",
+                    "name": "sample member",
+                    "price": 100.0,
+                    "change_pct": 1.2,
+                }
+            ]
+        )
+
+    def get_board_ranking(
+        self,
+        board_type: BoardType = BoardType.HY,
+        top_n: int = 50,
+        sort_by: str = "change_pct",
+        ascending: bool = False,
+    ) -> pd.DataFrame:
+        self.board_args = {
+            "board_type": board_type,
+            "top_n": top_n,
+            "sort_by": sort_by,
+            "ascending": ascending,
+        }
+        return pd.DataFrame(
+            [
+                {
+                    "code": "881001",
+                    "name": "sample sector",
+                    "change_pct": 1.2,
+                    "amount": 1000000.0,
+                    "vol": 10000,
+                    "main_net_amount": 50000.0,
+                    "up_count": 10,
+                    "down_count": 2,
+                    "member_count": 12,
+                }
+            ]
+        )
+
+    def get_unusual(
+        self,
+        market: int,
+        start: int = 0,
+        count: int = 0,
+    ) -> pd.DataFrame:
+        self.board_args = {"market": market, "start": start, "count": count}
+        return pd.DataFrame(
+            [
+                {
+                    "time": "10:30",
+                    "code": "600519",
+                    "name": "sample",
+                    "event": "rapid_rise",
+                }
+            ]
+        )
+
 
 def test_service_health_facade() -> None:
     result = service_health()
@@ -189,6 +283,7 @@ def test_a_share_kline_bars_facade() -> None:
 
     assert result["ok"] is True
     assert result["count"] == 1
+    assert fake.kline_args is not None
     assert fake.kline_args["market"] == int(Market.SH)
     assert fake.kline_args["code"] == "600519"
     assert fake.kline_args["period"] == Period.MIN_5
@@ -256,6 +351,78 @@ def test_a_share_trade_ticks_facade() -> None:
     }
 
 
+def test_a_share_sector_list_facade() -> None:
+    fake = FakeMacClient()
+    result = facade.a_share_sector_list(
+        sector_type="concept",
+        count=20,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.board_args == {"board_type": BoardType.GN, "count": 20}
+    assert result["rows"][0]["code"] == "881001"
+
+
+def test_a_share_sector_members_facade() -> None:
+    fake = FakeMacClient()
+    result = facade.a_share_sector_members(
+        sector_symbol="881001",
+        count=30,
+        sort_by="amount",
+        ascending=True,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.board_args == {
+        "board_symbol": "881001",
+        "count": 30,
+        "sort_type": SortType.TOTAL_AMOUNT,
+        "sort_order": SortOrder.ASC,
+        "fields": None,
+        "exclude_flags": None,
+    }
+
+
+def test_a_share_sector_ranking_facade() -> None:
+    fake = FakeMacClient()
+    result = facade.a_share_sector_ranking(
+        sector_type="industry",
+        top_n=10,
+        sort_by="amount",
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.board_args == {
+        "board_type": BoardType.HY,
+        "top_n": 10,
+        "sort_by": "amount",
+        "ascending": False,
+    }
+
+
+def test_a_share_sector_ranking_enforces_limit() -> None:
+    result = facade.a_share_sector_ranking(top_n=101)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "LIMIT_EXCEEDED"
+
+
+def test_a_share_market_events_facade() -> None:
+    fake = FakeMacClient()
+    result = facade.a_share_market_events(
+        market="SZ",
+        start=5,
+        count=50,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.board_args == {"market": int(Market.SZ), "start": 5, "count": 50}
+
+
 def test_service_health_tool_registered() -> None:
     async def run() -> None:
         server = create_server()
@@ -269,6 +436,10 @@ def test_service_health_tool_registered() -> None:
                 "a_share_kline_bars",
                 "a_share_intraday_timeseries",
                 "a_share_trade_ticks",
+                "a_share_sector_list",
+                "a_share_sector_members",
+                "a_share_sector_ranking",
+                "a_share_market_events",
             }.issubset(names)
 
     asyncio.run(run())
