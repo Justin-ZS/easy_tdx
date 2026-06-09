@@ -232,6 +232,32 @@ class FakeMacClient:
         )
 
 
+class FakeTdxClient:
+    def __enter__(self) -> FakeTdxClient:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def get_market_stat(self) -> pd.DataFrame:
+        return pd.DataFrame(
+            [
+                {
+                    "up_count": 3000,
+                    "down_count": 2000,
+                    "neutral_count": 100,
+                    "suspended_count": 50,
+                    "total_count": 5150,
+                    "total_amount": 1_000_000_000.0,
+                    "total_volume": 10_000_000,
+                    "total_market_cap": 90_000_000_000_000.0,
+                    "limit_up_count": 80,
+                    "limit_down_count": 20,
+                }
+            ]
+        )
+
+
 def test_service_health_facade() -> None:
     result = service_health()
 
@@ -423,6 +449,15 @@ def test_a_share_market_events_facade() -> None:
     assert fake.board_args == {"market": int(Market.SZ), "start": 5, "count": 50}
 
 
+def test_a_share_market_snapshot_facade() -> None:
+    result = facade.a_share_market_snapshot(client_factory=FakeTdxClient)
+
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert result["rows"][0]["up_count"] == 3000
+    assert result["rows"][0]["limit_down_count"] == 20
+
+
 def test_service_health_tool_registered() -> None:
     async def run() -> None:
         server = create_server()
@@ -440,6 +475,7 @@ def test_service_health_tool_registered() -> None:
                 "a_share_sector_members",
                 "a_share_sector_ranking",
                 "a_share_market_events",
+                "a_share_market_snapshot",
             }.issubset(names)
 
     asyncio.run(run())

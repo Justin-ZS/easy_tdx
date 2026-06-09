@@ -14,6 +14,7 @@ from typing import Any, Protocol, cast
 import pandas as pd  # type: ignore[import-untyped]
 
 from easy_tdx import __version__ as module_version
+from easy_tdx.client import TdxClient
 from easy_tdx.exceptions import TdxError
 from easy_tdx.mac.client import MacClient
 from easy_tdx.mac.enums import Adjust, BoardType, Period, SortOrder, SortType
@@ -164,6 +165,22 @@ class QuoteClient(Protocol):
 
 
 QuoteClientFactory = Callable[[], QuoteClient]
+
+
+class SnapshotClient(Protocol):
+    def __enter__(self) -> SnapshotClient: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+    def get_market_stat(self) -> pd.DataFrame: ...
+
+
+SnapshotClientFactory = Callable[[], SnapshotClient]
 
 
 def _package_version() -> str:
@@ -436,6 +453,10 @@ def _normalize_a_share_symbols(
 
 def _default_mac_client_factory() -> QuoteClient:
     return cast(QuoteClient, MacClient.from_best_host())
+
+
+def _default_tdx_client_factory() -> SnapshotClient:
+    return cast(SnapshotClient, TdxClient.from_best_host())
 
 
 def a_share_realtime_quotes(
@@ -770,6 +791,22 @@ def a_share_market_events(
     try:
         with client_factory() as client:
             df = client.get_unusual(market_id, start=start, count=limit)
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def a_share_market_snapshot(
+    *,
+    client_factory: SnapshotClientFactory = _default_tdx_client_factory,
+) -> dict[str, Any]:
+    """Fetch A-share market breadth and capitalization snapshot."""
+    query: dict[str, Any] = {}
+    try:
+        with client_factory() as client:
+            df = client.get_market_stat()
     except TdxError as exc:
         return error_envelope("TDX_ERROR", str(exc), query=query)
     except Exception as exc:

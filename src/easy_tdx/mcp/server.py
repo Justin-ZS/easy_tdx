@@ -164,6 +164,13 @@ def create_server() -> FastMCP:
     ) -> dict[str, Any]:
         return facade.a_share_market_events(market=market, start=start, count=count)
 
+    @mcp.tool(
+        name="a_share_market_snapshot",
+        description="Fetch A-share market breadth and capitalization snapshot.",
+    )
+    def a_share_market_snapshot() -> dict[str, Any]:
+        return facade.a_share_market_snapshot()
+
     return mcp
 
 
