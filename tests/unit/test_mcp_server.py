@@ -15,6 +15,8 @@ from easy_tdx.models.enums import Market
 class FakeMacClient:
     def __init__(self) -> None:
         self.stocks: list[tuple[int, str]] | None = None
+        self.tick_args: dict[str, object] | None = None
+        self.trade_args: dict[str, object] | None = None
 
     def __enter__(self) -> FakeMacClient:
         return self
@@ -70,6 +72,67 @@ class FakeMacClient:
                     "high": 10.8,
                     "low": 9.9,
                     "vol": 1000,
+                }
+            ]
+        )
+
+    def get_tick_chart(
+        self,
+        market: int,
+        code: str,
+        date: int | None = None,
+    ) -> pd.DataFrame:
+        self.tick_args = {"market": market, "code": code, "date": date, "days": 1}
+        return pd.DataFrame(
+            [
+                {
+                    "datetime": pd.Timestamp("2026-06-09 10:01:00"),
+                    "price": 10.1,
+                    "vol": 100,
+                }
+            ]
+        )
+
+    def get_tick_charts(
+        self,
+        market: int,
+        code: str,
+        date: int | None = None,
+        days: int = 5,
+    ) -> pd.DataFrame:
+        self.tick_args = {"market": market, "code": code, "date": date, "days": days}
+        return pd.DataFrame(
+            [
+                {
+                    "datetime": pd.Timestamp("2026-06-09 10:01:00"),
+                    "price": 10.1,
+                    "vol": 100,
+                }
+            ]
+        )
+
+    def get_transactions(
+        self,
+        market: int,
+        code: str,
+        count: int = 2000,
+        start: int = 0,
+        date: int | None = None,
+    ) -> pd.DataFrame:
+        self.trade_args = {
+            "market": market,
+            "code": code,
+            "count": count,
+            "start": start,
+            "date": date,
+        }
+        return pd.DataFrame(
+            [
+                {
+                    "datetime": pd.Timestamp("2026-06-09 10:02:00"),
+                    "price": 10.2,
+                    "vol": 200,
+                    "buyorsell": 0,
                 }
             ]
         )
@@ -148,6 +211,51 @@ def test_a_share_kline_bars_rejects_unknown_period() -> None:
     assert result["error"]["code"] == "INVALID_PERIOD"
 
 
+def test_a_share_intraday_timeseries_facade() -> None:
+    fake = FakeMacClient()
+    result = facade.a_share_intraday_timeseries(
+        symbol="SZ000001",
+        days=3,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.tick_args == {
+        "market": int(Market.SZ),
+        "code": "000001",
+        "date": None,
+        "days": 3,
+    }
+    assert result["rows"][0]["datetime"] == "2026-06-09T10:01:00"
+
+
+def test_a_share_intraday_timeseries_rejects_days_over_limit() -> None:
+    result = facade.a_share_intraday_timeseries(symbol="SH600519", days=6)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_LIMIT"
+
+
+def test_a_share_trade_ticks_facade() -> None:
+    fake = FakeMacClient()
+    result = facade.a_share_trade_ticks(
+        symbol="SH600519",
+        count=50,
+        start=10,
+        date=20260609,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.trade_args == {
+        "market": int(Market.SH),
+        "code": "600519",
+        "count": 50,
+        "start": 10,
+        "date": 20260609,
+    }
+
+
 def test_service_health_tool_registered() -> None:
     async def run() -> None:
         server = create_server()
@@ -159,6 +267,8 @@ def test_service_health_tool_registered() -> None:
                 "service_health",
                 "a_share_realtime_quotes",
                 "a_share_kline_bars",
+                "a_share_intraday_timeseries",
+                "a_share_trade_ticks",
             }.issubset(names)
 
     asyncio.run(run())

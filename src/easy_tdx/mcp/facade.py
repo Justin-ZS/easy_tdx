@@ -84,6 +84,30 @@ class QuoteClient(Protocol):
         adjust: Adjust = Adjust.NONE,
     ) -> pd.DataFrame: ...
 
+    def get_tick_chart(
+        self,
+        market: int,
+        code: str,
+        date: int | None = None,
+    ) -> pd.DataFrame: ...
+
+    def get_tick_charts(
+        self,
+        market: int,
+        code: str,
+        date: int | None = None,
+        days: int = 5,
+    ) -> pd.DataFrame: ...
+
+    def get_transactions(
+        self,
+        market: int,
+        code: str,
+        count: int = 2000,
+        start: int = 0,
+        date: int | None = None,
+    ) -> pd.DataFrame: ...
+
 
 QuoteClientFactory = Callable[[], QuoteClient]
 
@@ -229,6 +253,27 @@ def _parse_adjust(
     )
 
 
+def _normalize_single_a_share_symbol(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    query: dict[str, Any],
+) -> tuple[tuple[int, str] | None, dict[str, Any] | None]:
+    symbols = [symbol] if symbol else None
+    normalized, error = _normalize_a_share_symbols(symbols=symbols, market=market, code=code)
+    if error is not None:
+        return None, error
+    assert normalized is not None
+    if len(normalized) != 1:
+        return None, error_envelope(
+            "INVALID_SYMBOL",
+            "query requires exactly one A-share symbol",
+            query=query,
+        )
+    return normalized[0], None
+
+
 def _normalize_a_share_symbols(
     *,
     symbols: list[str] | None = None,
@@ -344,17 +389,12 @@ def a_share_kline_bars(
             query=query,
             details={"start": start},
         )
-    symbols = [symbol] if symbol else None
-    normalized, error = _normalize_a_share_symbols(symbols=symbols, market=market, code=code)
+    normalized, error = _normalize_single_a_share_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
     if error is not None:
         return error
     assert normalized is not None
-    if len(normalized) != 1:
-        return error_envelope(
-            "INVALID_SYMBOL",
-            "K-line query requires exactly one A-share symbol",
-            query=query,
-        )
     limit, error = _coerce_positive_limit(count, query=query)
     if error is not None:
         return error
@@ -367,7 +407,7 @@ def a_share_kline_bars(
     if error is not None:
         return error
     assert parsed_adjust is not None
-    market_id, parsed_code = normalized[0]
+    market_id, parsed_code = normalized
 
     try:
         with client_factory() as client:
@@ -384,6 +424,97 @@ def a_share_kline_bars(
     except Exception as exc:
         return error_envelope("TOOL_ERROR", str(exc), query=query)
 
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def a_share_intraday_timeseries(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    date: int | None = None,
+    days: int = 1,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch A-share intraday minute-level time series."""
+    query = {"symbol": symbol, "market": market, "code": code, "date": date, "days": days}
+    if days <= 0 or days > 5:
+        return error_envelope(
+            "INVALID_LIMIT",
+            "days must be between 1 and 5",
+            query=query,
+            details={"days": days, "max": 5},
+        )
+    normalized, error = _normalize_single_a_share_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
+    if error is not None:
+        return error
+    assert normalized is not None
+    market_id, parsed_code = normalized
+    try:
+        with client_factory() as client:
+            if days == 1:
+                df = client.get_tick_chart(market_id, parsed_code, date=date)
+            else:
+                df = client.get_tick_charts(market_id, parsed_code, date=date, days=days)
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def a_share_trade_ticks(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    date: int | None = None,
+    start: int = 0,
+    count: int | None = _DEFAULT_ROW_LIMIT,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch A-share trade tick records."""
+    query = {
+        "symbol": symbol,
+        "market": market,
+        "code": code,
+        "date": date,
+        "start": start,
+        "count": count,
+    }
+    if start < 0:
+        return error_envelope(
+            "INVALID_OFFSET",
+            "start must be non-negative",
+            query=query,
+            details={"start": start},
+        )
+    limit, error = _coerce_positive_limit(count, query=query)
+    if error is not None:
+        return error
+    assert limit is not None
+    normalized, error = _normalize_single_a_share_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
+    if error is not None:
+        return error
+    assert normalized is not None
+    market_id, parsed_code = normalized
+    try:
+        with client_factory() as client:
+            df = client.get_transactions(
+                market_id,
+                parsed_code,
+                count=limit,
+                start=start,
+                date=date,
+            )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
     return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
 
 

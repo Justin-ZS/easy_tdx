@@ -60,6 +60,49 @@ def create_server() -> FastMCP:
             adjust=adjust,
         )
 
+    @mcp.tool(
+        name="a_share_intraday_timeseries",
+        description="Fetch A-share intraday minute-level time series for one known symbol.",
+    )
+    def a_share_intraday_timeseries(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        date: int | None = None,
+        days: int = 1,
+    ) -> dict[str, Any]:
+        return facade.a_share_intraday_timeseries(
+            symbol=symbol,
+            market=market,
+            code=code,
+            date=date,
+            days=days,
+        )
+
+    @mcp.tool(
+        name="a_share_trade_ticks",
+        description=(
+            "Fetch A-share trade tick records for one known symbol. count defaults to 200 "
+            "and maxes at 1000."
+        ),
+    )
+    def a_share_trade_ticks(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        date: int | None = None,
+        start: int = 0,
+        count: int | None = 200,
+    ) -> dict[str, Any]:
+        return facade.a_share_trade_ticks(
+            symbol=symbol,
+            market=market,
+            code=code,
+            date=date,
+            start=start,
+            count=count,
+        )
+
     return mcp
 
 
