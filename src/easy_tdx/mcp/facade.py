@@ -7,6 +7,7 @@ selection live here so they can be tested without starting an MCP transport.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date, datetime
 from importlib.metadata import PackageNotFoundError, version
 from types import TracebackType
 from typing import Any, Protocol, cast
@@ -15,9 +16,10 @@ import pandas as pd  # type: ignore[import-untyped]
 
 from easy_tdx import __version__ as module_version
 from easy_tdx.client import TdxClient
+from easy_tdx.ex.mac_client import MacExClient
 from easy_tdx.exceptions import TdxError
 from easy_tdx.mac.client import MacClient
-from easy_tdx.mac.enums import Adjust, BoardType, Period, SortOrder, SortType
+from easy_tdx.mac.enums import Adjust, BoardType, ExMarket, Period, SortOrder, SortType
 from easy_tdx.models.enums import Market
 
 _PACKAGE_NAME = "easy-tdx"
@@ -32,6 +34,18 @@ _A_SHARE_MARKETS = {
     "SH": Market.SH,
     "SZ": Market.SZ,
     "BJ": Market.BJ,
+}
+_HK_MARKET_ALIASES = {
+    "HK": ExMarket.HK_MAIN_BOARD,
+    "HK_MAIN_BOARD": ExMarket.HK_MAIN_BOARD,
+    "MAIN": ExMarket.HK_MAIN_BOARD,
+    "MAIN_BOARD": ExMarket.HK_MAIN_BOARD,
+    "HK_GEM": ExMarket.HK_GEM,
+    "GEM": ExMarket.HK_GEM,
+    "HK_INDEX": ExMarket.HK_INDEX,
+    "INDEX": ExMarket.HK_INDEX,
+    "HK_FUND": ExMarket.HK_FUND,
+    "FUND": ExMarket.HK_FUND,
 }
 _SECTOR_TYPE_ALIASES = {
     "ALL": BoardType.ALL,
@@ -183,6 +197,43 @@ class SnapshotClient(Protocol):
 SnapshotClientFactory = Callable[[], SnapshotClient]
 
 
+class HkQuoteClient(Protocol):
+    def __enter__(self) -> HkQuoteClient: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None: ...
+
+    def goods_quotes(
+        self,
+        stocks: list[tuple[int, str]],
+        fields: object = None,
+    ) -> pd.DataFrame: ...
+
+    def goods_kline(
+        self,
+        market: int,
+        code: str,
+        period: Period = Period.DAILY,
+        start: int = 0,
+        count: int = 800,
+        adjust: Adjust = Adjust.NONE,
+    ) -> pd.DataFrame: ...
+
+    def goods_tick_chart(
+        self,
+        market: int,
+        code: str,
+        query_date: date | None = None,
+    ) -> pd.DataFrame: ...
+
+
+HkQuoteClientFactory = Callable[[], HkQuoteClient]
+
+
 def _package_version() -> str:
     try:
         return version(_PACKAGE_NAME)
@@ -264,6 +315,18 @@ def _split_symbol(symbol: str) -> tuple[str | None, str]:
     for prefix in _A_SHARE_MARKETS:
         if cleaned.startswith(prefix) and len(cleaned) > len(prefix):
             return prefix, cleaned[len(prefix) :]
+    return None, cleaned
+
+
+def _split_hk_symbol(symbol: str) -> tuple[str | None, str]:
+    cleaned = symbol.strip().upper().replace(".", " ")
+    if not cleaned:
+        return None, ""
+    parts = cleaned.split()
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    if cleaned.startswith("HK") and len(cleaned) > 2 and cleaned[2].isdigit():
+        return "HK", cleaned[2:]
     return None, cleaned
 
 
@@ -372,6 +435,22 @@ def _parse_member_sort_type(
     )
 
 
+def _parse_hk_market(
+    value: str,
+    *,
+    query: dict[str, Any],
+) -> tuple[int | None, dict[str, Any] | None]:
+    key = value.strip().upper().replace("-", "_").replace(" ", "_")
+    if key in _HK_MARKET_ALIASES:
+        return int(_HK_MARKET_ALIASES[key]), None
+    return None, error_envelope(
+        "INVALID_MARKET",
+        "Hong Kong market must be HK_MAIN_BOARD, HK_GEM, HK_INDEX, or HK_FUND",
+        query=query,
+        details={"market": value, "supported": sorted(_HK_MARKET_ALIASES)},
+    )
+
+
 def _normalize_single_a_share_symbol(
     *,
     symbol: str | None = None,
@@ -451,12 +530,105 @@ def _normalize_a_share_symbols(
     return normalized, None
 
 
+def _normalize_single_hk_symbol(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    query: dict[str, Any],
+) -> tuple[tuple[int, str] | None, dict[str, Any] | None]:
+    symbols = [symbol] if symbol else None
+    normalized, error = _normalize_hk_symbols(symbols=symbols, market=market, code=code)
+    if error is not None:
+        return None, error
+    assert normalized is not None
+    if len(normalized) != 1:
+        return None, error_envelope(
+            "INVALID_SYMBOL",
+            "query requires exactly one Hong Kong symbol",
+            query=query,
+        )
+    return normalized[0], None
+
+
+def _normalize_hk_symbols(
+    *,
+    symbols: list[str] | None = None,
+    market: str | None = None,
+    code: str | None = None,
+) -> tuple[list[tuple[int, str]] | None, dict[str, Any] | None]:
+    query: dict[str, Any] = {"symbols": symbols or [], "market": market, "code": code}
+    raw_symbols = list(symbols or [])
+    if market is not None or code is not None:
+        if not code:
+            return None, error_envelope(
+                "INVALID_SYMBOL",
+                "code is required when market is provided",
+                query=query,
+            )
+        raw_symbols.append(f"{market or 'HK_MAIN_BOARD'} {code}")
+    if not raw_symbols:
+        return None, error_envelope(
+            "INVALID_SYMBOL",
+            "at least one Hong Kong symbol is required",
+            query=query,
+        )
+    if len(raw_symbols) > _MAX_QUOTE_SYMBOLS:
+        return None, error_envelope(
+            "LIMIT_EXCEEDED",
+            f"symbols supports at most {_MAX_QUOTE_SYMBOLS} items",
+            query=query,
+            details={"max": _MAX_QUOTE_SYMBOLS, "actual": len(raw_symbols)},
+        )
+
+    normalized: list[tuple[int, str]] = []
+    for raw in raw_symbols:
+        prefix, parsed_code = _split_hk_symbol(raw)
+        market_id, error = _parse_hk_market(prefix or "HK_MAIN_BOARD", query=query)
+        if error is not None:
+            return None, error
+        assert market_id is not None
+        clean_code = parsed_code.strip().upper()
+        if not clean_code:
+            return None, error_envelope(
+                "INVALID_SYMBOL",
+                "Hong Kong code is required",
+                query=query,
+                details={"symbol": raw},
+            )
+        normalized.append((market_id, clean_code))
+    return normalized, None
+
+
+def _parse_query_date(
+    value: int | None,
+    *,
+    query: dict[str, Any],
+) -> tuple[date | None, dict[str, Any] | None]:
+    if value is None:
+        return None, None
+    raw = str(value)
+    try:
+        return datetime.strptime(raw, "%Y%m%d").date(), None
+    except ValueError:
+        return None, error_envelope(
+            "INVALID_DATE",
+            "date must use YYYYMMDD format",
+            query=query,
+            details={"date": value},
+        )
+
+
 def _default_mac_client_factory() -> QuoteClient:
     return cast(QuoteClient, MacClient.from_best_host())
 
 
 def _default_tdx_client_factory() -> SnapshotClient:
     return cast(SnapshotClient, TdxClient.from_best_host())
+
+
+def _default_hk_client_factory() -> HkQuoteClient:
+    return cast(HkQuoteClient, MacExClient.from_best_host())
 
 
 def a_share_realtime_quotes(
@@ -807,6 +979,123 @@ def a_share_market_snapshot(
     try:
         with client_factory() as client:
             df = client.get_market_stat()
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def hk_realtime_quotes(
+    *,
+    symbols: list[str] | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    client_factory: HkQuoteClientFactory = _default_hk_client_factory,
+) -> dict[str, Any]:
+    """Fetch Hong Kong realtime quotes for known symbols."""
+    query = {"symbols": symbols or [], "market": market, "code": code}
+    normalized, error = _normalize_hk_symbols(symbols=symbols, market=market, code=code)
+    if error is not None:
+        return error
+    assert normalized is not None
+    try:
+        with client_factory() as client:
+            df = client.goods_quotes(normalized)
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def hk_kline_bars(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    period: str = "DAILY",
+    count: int | None = _DEFAULT_ROW_LIMIT,
+    start: int = 0,
+    adjust: str = "NONE",
+    client_factory: HkQuoteClientFactory = _default_hk_client_factory,
+) -> dict[str, Any]:
+    """Fetch Hong Kong K-line bars for one known symbol."""
+    query = {
+        "symbol": symbol,
+        "market": market,
+        "code": code,
+        "period": period,
+        "count": count,
+        "start": start,
+        "adjust": adjust,
+    }
+    if start < 0:
+        return error_envelope(
+            "INVALID_OFFSET",
+            "start must be non-negative",
+            query=query,
+            details={"start": start},
+        )
+    normalized, error = _normalize_single_hk_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
+    if error is not None:
+        return error
+    assert normalized is not None
+    limit, error = _coerce_positive_limit(count, query=query)
+    if error is not None:
+        return error
+    assert limit is not None
+    parsed_period, error = _parse_period(period, query=query)
+    if error is not None:
+        return error
+    assert parsed_period is not None
+    parsed_adjust, error = _parse_adjust(adjust, query=query)
+    if error is not None:
+        return error
+    assert parsed_adjust is not None
+    market_id, parsed_code = normalized
+    try:
+        with client_factory() as client:
+            df = client.goods_kline(
+                market_id,
+                parsed_code,
+                period=parsed_period,
+                start=start,
+                count=limit,
+                adjust=parsed_adjust,
+            )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+    return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def hk_intraday_timeseries(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    date: int | None = None,
+    client_factory: HkQuoteClientFactory = _default_hk_client_factory,
+) -> dict[str, Any]:
+    """Fetch Hong Kong intraday minute-level time series."""
+    query = {"symbol": symbol, "market": market, "code": code, "date": date}
+    normalized, error = _normalize_single_hk_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
+    if error is not None:
+        return error
+    assert normalized is not None
+    query_date, error = _parse_query_date(date, query=query)
+    if error is not None:
+        return error
+    market_id, parsed_code = normalized
+    try:
+        with client_factory() as client:
+            df = client.goods_tick_chart(market_id, parsed_code, query_date=query_date)
     except TdxError as exc:
         return error_envelope("TDX_ERROR", str(exc), query=query)
     except Exception as exc:

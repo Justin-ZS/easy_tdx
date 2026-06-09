@@ -171,6 +171,63 @@ def create_server() -> FastMCP:
     def a_share_market_snapshot() -> dict[str, Any]:
         return facade.a_share_market_snapshot()
 
+    @mcp.tool(
+        name="hk_realtime_quotes",
+        description=(
+            "Fetch Hong Kong realtime quotes. Bare codes default to HK_MAIN_BOARD; "
+            "use market for HK_GEM, HK_INDEX, or HK_FUND."
+        ),
+    )
+    def hk_realtime_quotes(
+        symbols: list[str] | None = None,
+        market: str | None = None,
+        code: str | None = None,
+    ) -> dict[str, Any]:
+        return facade.hk_realtime_quotes(symbols=symbols, market=market, code=code)
+
+    @mcp.tool(
+        name="hk_kline_bars",
+        description=(
+            "Fetch Hong Kong K-line bars for one known symbol. count defaults "
+            "to 200 and maxes at 1000."
+        ),
+    )
+    def hk_kline_bars(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        period: str = "DAILY",
+        count: int | None = 200,
+        start: int = 0,
+        adjust: str = "NONE",
+    ) -> dict[str, Any]:
+        return facade.hk_kline_bars(
+            symbol=symbol,
+            market=market,
+            code=code,
+            period=period,
+            count=count,
+            start=start,
+            adjust=adjust,
+        )
+
+    @mcp.tool(
+        name="hk_intraday_timeseries",
+        description="Fetch Hong Kong intraday minute-level time series for one known symbol.",
+    )
+    def hk_intraday_timeseries(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        date: int | None = None,
+    ) -> dict[str, Any]:
+        return facade.hk_intraday_timeseries(
+            symbol=symbol,
+            market=market,
+            code=code,
+            date=date,
+        )
+
     return mcp
 
 

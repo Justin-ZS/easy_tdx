@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 import pandas as pd  # type: ignore[import-untyped]
 from fastmcp import Client
 
-from easy_tdx.mac.enums import Adjust, BoardType, Period, SortOrder, SortType
+from easy_tdx.mac.enums import Adjust, BoardType, ExMarket, Period, SortOrder, SortType
 from easy_tdx.mcp import facade
 from easy_tdx.mcp.facade import service_health
 from easy_tdx.mcp.server import create_server
@@ -258,6 +259,81 @@ class FakeTdxClient:
         )
 
 
+class FakeHkClient:
+    def __init__(self) -> None:
+        self.stocks: list[tuple[int, str]] | None = None
+        self.kline_args: dict[str, object] | None = None
+        self.tick_args: dict[str, object] | None = None
+
+    def __enter__(self) -> FakeHkClient:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def goods_quotes(
+        self,
+        stocks: list[tuple[int, str]],
+        fields: object = None,
+    ) -> pd.DataFrame:
+        self.stocks = stocks
+        return pd.DataFrame(
+            [
+                {
+                    "market": market,
+                    "code": code,
+                    "name": "sample hk",
+                    "price": 300.0,
+                }
+                for market, code in stocks
+            ]
+        )
+
+    def goods_kline(
+        self,
+        market: int,
+        code: str,
+        period: Period = Period.DAILY,
+        start: int = 0,
+        count: int = 800,
+        adjust: Adjust = Adjust.NONE,
+    ) -> pd.DataFrame:
+        self.kline_args = {
+            "market": market,
+            "code": code,
+            "period": period,
+            "start": start,
+            "count": count,
+            "adjust": adjust,
+        }
+        return pd.DataFrame(
+            [
+                {
+                    "datetime": pd.Timestamp("2026-06-09 10:00:00"),
+                    "open": 300.0,
+                    "close": 305.0,
+                }
+            ]
+        )
+
+    def goods_tick_chart(
+        self,
+        market: int,
+        code: str,
+        query_date: date | None = None,
+    ) -> pd.DataFrame:
+        self.tick_args = {"market": market, "code": code, "query_date": query_date}
+        return pd.DataFrame(
+            [
+                {
+                    "datetime": pd.Timestamp("2026-06-09 10:01:00"),
+                    "price": 301.0,
+                    "vol": 1000,
+                }
+            ]
+        )
+
+
 def test_service_health_facade() -> None:
     result = service_health()
 
@@ -458,6 +534,73 @@ def test_a_share_market_snapshot_facade() -> None:
     assert result["rows"][0]["limit_down_count"] == 20
 
 
+def test_hk_realtime_quotes_facade() -> None:
+    fake = FakeHkClient()
+    result = facade.hk_realtime_quotes(
+        symbols=["00700", "HK 00941"],
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.stocks == [
+        (int(ExMarket.HK_MAIN_BOARD), "00700"),
+        (int(ExMarket.HK_MAIN_BOARD), "00941"),
+    ]
+    assert result["rows"][0]["code"] == "00700"
+
+
+def test_hk_realtime_quotes_enforces_symbol_limit() -> None:
+    result = facade.hk_realtime_quotes(symbols=["00700"] * 81)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "LIMIT_EXCEEDED"
+
+
+def test_hk_kline_bars_facade() -> None:
+    fake = FakeHkClient()
+    result = facade.hk_kline_bars(
+        market="HK_GEM",
+        code="08000",
+        period="DAILY",
+        count=20,
+        adjust="NONE",
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.kline_args == {
+        "market": int(ExMarket.HK_GEM),
+        "code": "08000",
+        "period": Period.DAILY,
+        "start": 0,
+        "count": 20,
+        "adjust": Adjust.NONE,
+    }
+
+
+def test_hk_intraday_timeseries_facade() -> None:
+    fake = FakeHkClient()
+    result = facade.hk_intraday_timeseries(
+        symbol="HK 00700",
+        date=20260609,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.tick_args == {
+        "market": int(ExMarket.HK_MAIN_BOARD),
+        "code": "00700",
+        "query_date": date(2026, 6, 9),
+    }
+
+
+def test_hk_intraday_timeseries_rejects_bad_date() -> None:
+    result = facade.hk_intraday_timeseries(symbol="HK 00700", date=20261340)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_DATE"
+
+
 def test_service_health_tool_registered() -> None:
     async def run() -> None:
         server = create_server()
@@ -476,6 +619,9 @@ def test_service_health_tool_registered() -> None:
                 "a_share_sector_ranking",
                 "a_share_market_events",
                 "a_share_market_snapshot",
+                "hk_realtime_quotes",
+                "hk_kline_bars",
+                "hk_intraday_timeseries",
             }.issubset(names)
 
     asyncio.run(run())
