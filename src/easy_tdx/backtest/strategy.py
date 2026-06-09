@@ -100,7 +100,7 @@ class StrategyDataProxy:
             if col == "datetime":
                 continue
             arr = df[col].to_numpy()
-            if len(arr) > 0 and isinstance(arr[0], (np.datetime64, pd.Timestamp)):
+            if len(arr) > 0 and isinstance(arr[0], np.datetime64 | pd.Timestamp):
                 # datetime 列转为 int (YYYYMMDD)
                 self._arrays[col] = _datetime_to_int(arr)
             else:
@@ -250,7 +250,7 @@ class Strategy(ABC):
 
     # ── 指标注册 ───────────────────────────────────────────────────────────────
 
-    def I(
+    def I(  # noqa: E743
         self, func: Callable[..., NDArray], *args: Any, **kwargs: Any
     ) -> NDArray:
         """注册指标。
@@ -441,7 +441,7 @@ def _datetime_to_int(arr: NDArray) -> NDArray:
     """
     result = np.zeros(len(arr), dtype=np.float64)
     for i, val in enumerate(arr):
-        if isinstance(val, (np.datetime64, pd.Timestamp)):
+        if isinstance(val, np.datetime64 | pd.Timestamp):
             ts = pd.Timestamp(val)
             result[i] = float(ts.strftime("%Y%m%d"))
         else:

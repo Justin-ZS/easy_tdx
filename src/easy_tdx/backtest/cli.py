@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
-import json
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -53,9 +53,9 @@ def backtest(
 
       easy-tdx backtest SZ 000001 --strategy-file my_strategy.py --indicators MACD,KDJ
     """
+    from ..backtest.engine import BacktestEngine
     from ..cli.conn import get_mac_client
     from ..cli.parsers import parse_adjust, parse_market, parse_period
-    from ..backtest.engine import BacktestEngine
     from ..indicator import compute_indicators
 
     # 1. 加载策略
@@ -114,7 +114,6 @@ def _load_strategy(
     Returns:
         Strategy 子类
     """
-    from ..backtest.strategy import Strategy
 
     if strategy_file:
         return _load_strategy_from_file(strategy_file)
@@ -174,7 +173,7 @@ def _load_strategy_from_file(path: str) -> type:
     return strategy_classes[0]
 
 
-def _print_table(result) -> None:
+def _print_table(result: Any) -> None:
     """以表格形式输出回测结果。"""
     perf = result.performance
     config = result.config

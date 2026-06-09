@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import warnings
-
 import pandas as pd
-import pytest
 
 from easy_tdx.backtest.orders import OrderSimulator
 from easy_tdx.backtest.types import Signal
-
 
 # ── Test Fixtures ─────────────────────────────────────────────────────────────
 

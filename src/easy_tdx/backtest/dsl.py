@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 
 from .strategy import Strategy
 
@@ -31,23 +32,24 @@ def dsl_strategy(func: Callable[..., Any]) -> type[Strategy]:
 
     class DSLStrategy(Strategy):
         _signal_func = staticmethod(func)
-        _buy_mask: np.ndarray | None = None
-        _sell_mask: np.ndarray | None = None
+        _buy_mask: NDArray[np.bool_] | None = None
+        _sell_mask: NDArray[np.bool_] | None = None
 
         def init(self) -> None:
             pass
 
         def next(self) -> None:
-            if self._buy_mask is None:
+            buy = self._buy_mask
+            sell = self._sell_mask
+            if buy is None or sell is None:
                 return
             idx = self._bar_index
-            if idx < len(self._buy_mask) and self._buy_mask[idx]:
+            if idx < len(buy) and buy[idx]:
                 self.buy(size=0)
-            elif idx < len(self._sell_mask) and self._sell_mask[idx]:
+            elif idx < len(sell) and sell[idx]:
                 self.sell(size=0)
 
     DSLStrategy.__name__ = func.__name__
     DSLStrategy.__qualname__ = func.__qualname__
-    DSLStrategy._signal_func = func  # type: ignore[attr-defined]
 
     return DSLStrategy

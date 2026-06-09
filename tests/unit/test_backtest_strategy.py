@@ -12,8 +12,6 @@ from easy_tdx.backtest.strategy import (
     _SeriesAccessor,
     crossover,
 )
-from easy_tdx.backtest.types import Signal
-
 
 # ── 辅助函数 ─────────────────────────────────────────────────────────────────────
 
@@ -186,12 +184,12 @@ class TestCrossover:
         mask = crossover(a, b)
 
         # 索引 3 处：a[2]=3 <= b[2]=3, a[3]=4 > b[3]=2 → 金叉
-        assert mask[3] == True
+        assert mask[3]
         # 其他位置无金叉
-        assert mask[0] == False
-        assert mask[1] == False
-        assert mask[2] == False
-        assert mask[4] == False
+        assert not mask[0]
+        assert not mask[1]
+        assert not mask[2]
+        assert not mask[4]
 
     def test_crossover_false_no_cross(self) -> None:
         """测试无金叉情况（a 全在 b 下方）。"""
@@ -208,7 +206,7 @@ class TestCrossover:
         b = pd.Series([5, 4, 3, 2, 1])
         mask = crossover(a, b)
 
-        assert mask[3] == True
+        assert mask[3]
 
     def test_crossover_with_accessor(self) -> None:
         """测试接受 _SeriesAccessor 参数。"""
@@ -218,7 +216,7 @@ class TestCrossover:
         acc_b = _SeriesAccessor(arr_b, bar_index=4)
 
         mask = crossover(acc_a, acc_b)
-        assert mask[3] == True
+        assert mask[3]
 
 
 # ── TestStrategyBase ──────────────────────────────────────────────────────────────
