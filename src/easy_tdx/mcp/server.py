@@ -208,6 +208,40 @@ def create_server() -> FastMCP:
         )
 
     @mcp.tool(
+        name="a_share_market_analysis",
+        description=(
+            "Return A-share quote, K-line, and technical indicator blocks for agent analysis. "
+            "Does not produce investment advice."
+        ),
+    )
+    def a_share_market_analysis(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        period: str = "DAILY",
+        count: int | None = 120,
+        adjust: str = "QFQ",
+        indicators: list[str] | None = None,
+        params: facade.IndicatorParams | None = None,
+        include_quote: bool = True,
+        include_kline: bool = True,
+        include_indicators: bool = True,
+    ) -> dict[str, Any]:
+        return facade.a_share_market_analysis(
+            symbol=symbol,
+            market=market,
+            code=code,
+            period=period,
+            count=count,
+            adjust=adjust,
+            indicators=indicators,
+            params=params,
+            include_quote=include_quote,
+            include_kline=include_kline,
+            include_indicators=include_indicators,
+        )
+
+    @mcp.tool(
         name="hk_realtime_quotes",
         description=(
             "Fetch Hong Kong realtime quotes. Bare codes default to HK_MAIN_BOARD; "

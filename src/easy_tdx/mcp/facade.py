@@ -36,6 +36,8 @@ _MAX_INDICATOR_ROW_LIMIT = 1000
 _DEFAULT_INDICATOR_WARMUP_ROWS = 120
 _MAX_INDICATOR_FETCH_ROWS = 1200
 _DEFAULT_TECHNICAL_INDICATORS = ["MACD", "KDJ", "RSI", "BOLL", "ATR", "CCI", "OBV", "BIAS"]
+_DEFAULT_ANALYSIS_INDICATORS = ["MACD", "KDJ", "RSI", "BOLL", "MA", "EMA"]
+_ANALYSIS_WARNING = "technical indicators are derived data, not investment advice"
 _A_SHARE_MARKETS = {
     "SH": Market.SH,
     "SZ": Market.SZ,
@@ -701,6 +703,19 @@ def _indicator_error_envelope(
     return error_envelope("TOOL_ERROR", message, query=query)
 
 
+def _error_with_block(result: dict[str, Any], block: str) -> dict[str, Any]:
+    error = result.get("error")
+    if isinstance(error, dict):
+        details = error.setdefault("details", {})
+        if isinstance(details, dict):
+            details["block"] = block
+    return result
+
+
+def _partial_error(code: str, message: str, *, block: str) -> dict[str, Any]:
+    return {"block": block, "code": code, "message": message}
+
+
 def _default_mac_client_factory() -> QuoteClient:
     return cast(QuoteClient, MacClient.from_best_host())
 
@@ -1153,6 +1168,148 @@ def a_share_technical_indicators(
         "indicator_params": params or {},
     }
     return response
+
+
+def a_share_market_analysis(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    period: str = "DAILY",
+    count: int | None = _DEFAULT_INDICATOR_ROW_LIMIT,
+    adjust: str = "QFQ",
+    indicators: list[str] | None = None,
+    params: IndicatorParams | None = None,
+    include_quote: bool = True,
+    include_kline: bool = True,
+    include_indicators: bool = True,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Return quote, K-line, and indicator blocks for agent analysis."""
+    query = {
+        "symbol": symbol,
+        "market": market,
+        "code": code,
+        "period": period,
+        "count": count,
+        "adjust": adjust,
+        "indicators": indicators or list(_DEFAULT_ANALYSIS_INDICATORS),
+        "params": params or {},
+        "include_quote": include_quote,
+        "include_kline": include_kline,
+        "include_indicators": include_indicators,
+    }
+    if not (include_quote or include_kline or include_indicators):
+        return error_envelope(
+            "INVALID_ANALYSIS_REQUEST",
+            "at least one analysis block must be requested",
+            query=query,
+        )
+    if not (include_kline or include_indicators):
+        return error_envelope(
+            "INVALID_ANALYSIS_REQUEST",
+            "analysis requires kline or indicators as a core block",
+            query=query,
+        )
+    normalized, error = _normalize_single_a_share_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
+    if error is not None:
+        return error
+    assert normalized is not None
+    limits, error = _indicator_limits(count, query=query)
+    if error is not None:
+        return error
+    assert limits is not None
+    limit, fetch_count = limits
+    parsed_period, error = _parse_period(period, query=query)
+    if error is not None:
+        return error
+    assert parsed_period is not None
+    parsed_adjust, error = _parse_adjust(adjust, query=query)
+    if error is not None:
+        return error
+    assert parsed_adjust is not None
+    indicator_names: list[str] = []
+    if include_indicators:
+        parsed_indicator_names, error = _normalize_indicator_names(
+            indicators,
+            query=query,
+            default=_DEFAULT_ANALYSIS_INDICATORS,
+        )
+        if error is not None:
+            return error
+        assert parsed_indicator_names is not None
+        indicator_names = parsed_indicator_names
+    market_id, parsed_code = normalized
+
+    quote_row: dict[str, Any] | None = None
+    partial_errors: list[dict[str, Any]] = []
+
+    try:
+        with client_factory() as client:
+            if include_quote:
+                try:
+                    quote_rows = dataframe_rows(client.get_stock_quotes([(market_id, parsed_code)]))
+                    quote_row = quote_rows[0] if quote_rows else None
+                except TdxError as exc:
+                    partial_errors.append(_partial_error("TDX_ERROR", str(exc), block="quote"))
+                except Exception as exc:
+                    partial_errors.append(_partial_error("TOOL_ERROR", str(exc), block="quote"))
+
+            df = client.get_stock_kline(
+                market_id,
+                parsed_code,
+                period=parsed_period,
+                count=fetch_count,
+                adjust=parsed_adjust,
+            )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query, details={"block": "kline"})
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query, details={"block": "kline"})
+
+    kline_rows = dataframe_rows(df.iloc[-limit:].reset_index(drop=True)) if include_kline else []
+    indicator_rows: list[dict[str, Any]] = []
+    if include_indicators:
+        try:
+            indicator_df = compute_indicators(
+                df,
+                indicator_names,
+                params=params or {},
+                keep_ohlcv=True,
+                tail=limit,
+            )
+            indicator_rows = dataframe_rows(indicator_df)
+        except (ValueError, TypeError) as exc:
+            return _error_with_block(_indicator_error_envelope(exc, query=query), "indicators")
+        except Exception as exc:
+            return error_envelope(
+                "TOOL_ERROR",
+                str(exc),
+                query=query,
+                details={"block": "indicators"},
+            )
+
+    data: dict[str, Any] = {
+        "metadata": {
+            "period": period,
+            "adjust": adjust,
+            "indicator_params": params or {},
+            "fetch_count": fetch_count,
+            "warmup_rows": _DEFAULT_INDICATOR_WARMUP_ROWS,
+            "warning": _ANALYSIS_WARNING,
+        }
+    }
+    if include_quote:
+        data["quote"] = quote_row
+    if include_kline:
+        data["kline"] = {"count": len(kline_rows), "rows": kline_rows}
+    if include_indicators:
+        data["indicators"] = {"count": len(indicator_rows), "rows": indicator_rows}
+    if partial_errors:
+        data["errors"] = partial_errors
+    return envelope(source="easy_tdx", query=query, data=data)
 
 
 def hk_realtime_quotes(

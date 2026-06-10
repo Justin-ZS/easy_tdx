@@ -6,6 +6,7 @@ from datetime import date
 import pandas as pd  # type: ignore[import-untyped]
 from fastmcp import Client
 
+from easy_tdx.exceptions import TdxError
 from easy_tdx.mac.enums import Adjust, BoardType, ExMarket, Period, SortOrder, SortType
 from easy_tdx.mcp import facade
 from easy_tdx.mcp.facade import service_health
@@ -651,6 +652,149 @@ def test_a_share_technical_indicators_enforces_return_limit() -> None:
     assert result["error"]["code"] == "LIMIT_EXCEEDED"
 
 
+def test_a_share_market_analysis_facade() -> None:
+    class AnalysisFakeClient(FakeMacClient):
+        def get_stock_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            times: int = 1,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            self.kline_args = {
+                "market": market,
+                "code": code,
+                "period": period,
+                "start": start,
+                "count": count,
+                "times": times,
+                "adjust": adjust,
+            }
+            return pd.DataFrame(
+                [
+                    {
+                        "datetime": pd.Timestamp("2026-06-09") + pd.Timedelta(days=i),
+                        "open": 10.0 + i,
+                        "close": 10.5 + i,
+                        "high": 10.8 + i,
+                        "low": 9.9 + i,
+                        "vol": 1000 + i,
+                    }
+                    for i in range(count)
+                ]
+            )
+
+    fake = AnalysisFakeClient()
+    result = facade.a_share_market_analysis(
+        symbol="SH600519",
+        count=20,
+        indicators=["MA", "EMA"],
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert fake.stocks == [(int(Market.SH), "600519")]
+    assert fake.kline_args is not None
+    assert fake.kline_args["count"] == 200
+    data = result["data"]
+    assert data["quote"]["code"] == "600519"
+    assert data["kline"]["count"] == 20
+    assert data["indicators"]["count"] == 20
+    assert "MA" in data["indicators"]["rows"][0]
+    assert (
+        data["metadata"]["warning"]
+        == "technical indicators are derived data, not investment advice"
+    )
+    assert "errors" not in data
+
+
+def test_a_share_market_analysis_keeps_partial_quote_error() -> None:
+    class QuoteFailingClient(FakeMacClient):
+        def get_stock_quotes(
+            self,
+            stocks: list[tuple[int, str]],
+            fields: object = None,
+        ) -> pd.DataFrame:
+            raise TdxError("quote unavailable")
+
+        def get_stock_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            times: int = 1,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            return pd.DataFrame(
+                [
+                    {
+                        "datetime": pd.Timestamp("2026-06-09") + pd.Timedelta(days=i),
+                        "open": 10.0 + i,
+                        "close": 10.5 + i,
+                        "high": 10.8 + i,
+                        "low": 9.9 + i,
+                        "vol": 1000 + i,
+                    }
+                    for i in range(count)
+                ]
+            )
+
+    result = facade.a_share_market_analysis(
+        symbol="SH600519",
+        count=20,
+        indicators=["MA"],
+        client_factory=QuoteFailingClient,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["quote"] is None
+    assert result["data"]["errors"] == [
+        {"block": "quote", "code": "TDX_ERROR", "message": "quote unavailable"}
+    ]
+
+
+def test_a_share_market_analysis_fails_on_core_kline_error() -> None:
+    class KlineFailingClient(FakeMacClient):
+        def get_stock_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            times: int = 1,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            raise TdxError("kline unavailable")
+
+    result = facade.a_share_market_analysis(
+        symbol="SH600519",
+        client_factory=KlineFailingClient,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "TDX_ERROR"
+    assert result["error"]["details"]["block"] == "kline"
+
+
+def test_a_share_market_analysis_ignores_indicators_when_not_requested() -> None:
+    result = facade.a_share_market_analysis(
+        symbol="SH600519",
+        include_indicators=False,
+        indicators=["NO_SUCH_INDICATOR"],
+        client_factory=FakeMacClient,
+    )
+
+    assert result["ok"] is True
+    assert "indicators" not in result["data"]
+
+
 def test_hk_realtime_quotes_facade() -> None:
     fake = FakeHkClient()
     result = facade.hk_realtime_quotes(
@@ -837,6 +981,7 @@ def test_service_health_tool_registered() -> None:
                 "a_share_market_snapshot",
                 "technical_indicator_catalog",
                 "a_share_technical_indicators",
+                "a_share_market_analysis",
                 "hk_realtime_quotes",
                 "hk_kline_bars",
                 "hk_technical_indicators",
