@@ -244,8 +244,10 @@ def create_server() -> FastMCP:
     @mcp.tool(
         name="hk_realtime_quotes",
         description=(
-            "Fetch Hong Kong realtime quotes. Bare codes default to HK_MAIN_BOARD; "
-            "use market for HK_GEM, HK_INDEX, or HK_FUND."
+            "Fetch Hong Kong quote rows. Bare codes default to HK_MAIN_BOARD; "
+            "use market for HK_GEM, HK_INDEX, or HK_FUND. "
+            "The upstream Hong Kong feed is delayed by 15 minutes; "
+            "check returned timestamps before treating it as live data."
         ),
     )
     def hk_realtime_quotes(
@@ -259,7 +261,8 @@ def create_server() -> FastMCP:
         name="hk_kline_bars",
         description=(
             "Fetch Hong Kong K-line bars for one known symbol. count defaults "
-            "to 200 and maxes at 1000."
+            "to 200 and maxes at 1000. Intraday Hong Kong bars are delayed by "
+            "15 minutes; check the latest returned datetime."
         ),
     )
     def hk_kline_bars(
@@ -285,7 +288,8 @@ def create_server() -> FastMCP:
         name="hk_technical_indicators",
         description=(
             "Fetch Hong Kong K-line bars and calculate technical indicators. "
-            "Bare codes default to HK_MAIN_BOARD."
+            "Bare codes default to HK_MAIN_BOARD. Indicators on intraday Hong Kong "
+            "bars inherit the 15-minute upstream delay; check the latest returned datetime."
         ),
     )
     def hk_technical_indicators(
@@ -315,7 +319,8 @@ def create_server() -> FastMCP:
         name="hk_market_analysis",
         description=(
             "Return Hong Kong quote, K-line, and technical indicator blocks for agent analysis. "
-            "Does not produce investment advice."
+            "Does not produce investment advice. Hong Kong quote and intraday data "
+            "are delayed by 15 minutes."
         ),
     )
     def hk_market_analysis(
@@ -347,7 +352,11 @@ def create_server() -> FastMCP:
 
     @mcp.tool(
         name="hk_intraday_timeseries",
-        description="Fetch Hong Kong intraday minute-level time series for one known symbol.",
+        description=(
+            "Fetch Hong Kong intraday minute-level time series for one known symbol. "
+            "The upstream Hong Kong feed is delayed by 15 minutes; "
+            "check the latest returned datetime before using it as a live signal."
+        ),
     )
     def hk_intraday_timeseries(
         symbol: str | None = None,

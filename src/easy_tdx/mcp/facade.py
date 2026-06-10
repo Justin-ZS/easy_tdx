@@ -1319,7 +1319,11 @@ def hk_realtime_quotes(
     code: str | None = None,
     client_factory: HkQuoteClientFactory = _default_hk_client_factory,
 ) -> dict[str, Any]:
-    """Fetch Hong Kong realtime quotes for known symbols."""
+    """Fetch Hong Kong quote rows for known symbols.
+
+    The upstream Hong Kong feed is delayed by 15 minutes; callers should inspect returned
+    timestamps or server update fields before treating data as live.
+    """
     query = {"symbols": symbols or [], "market": market, "code": code}
     normalized, error = _normalize_hk_symbols(symbols=symbols, market=market, code=code)
     if error is not None:
@@ -1346,7 +1350,11 @@ def hk_kline_bars(
     adjust: str = "NONE",
     client_factory: HkQuoteClientFactory = _default_hk_client_factory,
 ) -> dict[str, Any]:
-    """Fetch Hong Kong K-line bars for one known symbol."""
+    """Fetch Hong Kong K-line bars for one known symbol.
+
+    Intraday Hong Kong bars inherit the 15-minute upstream delay; callers should
+    inspect the latest returned datetime when freshness matters.
+    """
     query = {
         "symbol": symbol,
         "market": market,
@@ -1412,7 +1420,10 @@ def hk_technical_indicators(
     keep_ohlcv: bool = True,
     client_factory: HkQuoteClientFactory = _default_hk_client_factory,
 ) -> dict[str, Any]:
-    """Fetch Hong Kong K-line bars and calculate technical indicators."""
+    """Fetch Hong Kong K-line bars and calculate technical indicators.
+
+    Indicators computed on intraday Hong Kong bars inherit the 15-minute upstream delay.
+    """
     query = {
         "symbol": symbol,
         "market": market,
@@ -1496,7 +1507,10 @@ def hk_market_analysis(
     include_indicators: bool = True,
     client_factory: HkQuoteClientFactory = _default_hk_client_factory,
 ) -> dict[str, Any]:
-    """Return Hong Kong quote, K-line, and indicator blocks for agent analysis."""
+    """Return Hong Kong quote, K-line, and indicator blocks for agent analysis.
+
+    Hong Kong quote and intraday data are delayed by 15 minutes.
+    """
     query = {
         "symbol": symbol,
         "market": market,
@@ -1631,7 +1645,10 @@ def hk_intraday_timeseries(
     date: int | None = None,
     client_factory: HkQuoteClientFactory = _default_hk_client_factory,
 ) -> dict[str, Any]:
-    """Fetch Hong Kong intraday minute-level time series."""
+    """Fetch Hong Kong intraday minute-level time series.
+
+    The upstream Hong Kong feed is delayed by 15 minutes.
+    """
     query = {"symbol": symbol, "market": market, "code": code, "date": date}
     normalized, error = _normalize_single_hk_symbol(
         symbol=symbol, market=market, code=code, query=query
