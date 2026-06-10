@@ -918,6 +918,132 @@ def test_hk_technical_indicators_rejects_unknown_market() -> None:
     assert result["error"]["code"] == "INVALID_MARKET"
 
 
+def test_hk_market_analysis_facade() -> None:
+    class AnalysisFakeHkClient(FakeHkClient):
+        def goods_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            self.kline_args = {
+                "market": market,
+                "code": code,
+                "period": period,
+                "start": start,
+                "count": count,
+                "adjust": adjust,
+            }
+            return pd.DataFrame(
+                [
+                    {
+                        "datetime": pd.Timestamp("2026-06-09") + pd.Timedelta(days=i),
+                        "open": 300.0 + i,
+                        "close": 301.0 + i,
+                        "high": 302.0 + i,
+                        "low": 299.0 + i,
+                        "vol": 1000 + i,
+                    }
+                    for i in range(count)
+                ]
+            )
+
+    fake = AnalysisFakeHkClient()
+    result = facade.hk_market_analysis(
+        symbol="00700",
+        count=20,
+        indicators=["MA", "EMA"],
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert result["count"] == 1
+    assert fake.stocks == [(int(ExMarket.HK_MAIN_BOARD), "00700")]
+    assert fake.kline_args is not None
+    assert fake.kline_args["count"] == 200
+    data = result["data"]
+    assert data["quote"]["code"] == "00700"
+    assert data["kline"]["count"] == 20
+    assert data["indicators"]["count"] == 20
+    assert "EMA" in data["indicators"]["rows"][0]
+    assert (
+        data["metadata"]["warning"]
+        == "technical indicators are derived data, not investment advice"
+    )
+
+
+def test_hk_market_analysis_keeps_partial_quote_error() -> None:
+    class QuoteFailingHkClient(FakeHkClient):
+        def goods_quotes(
+            self,
+            stocks: list[tuple[int, str]],
+            fields: object = None,
+        ) -> pd.DataFrame:
+            raise TdxError("quote unavailable")
+
+        def goods_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            return pd.DataFrame(
+                [
+                    {
+                        "datetime": pd.Timestamp("2026-06-09") + pd.Timedelta(days=i),
+                        "open": 300.0 + i,
+                        "close": 301.0 + i,
+                        "high": 302.0 + i,
+                        "low": 299.0 + i,
+                        "vol": 1000 + i,
+                    }
+                    for i in range(count)
+                ]
+            )
+
+    result = facade.hk_market_analysis(
+        symbol="00700",
+        count=20,
+        indicators=["MA"],
+        client_factory=QuoteFailingHkClient,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["quote"] is None
+    assert result["data"]["errors"] == [
+        {"block": "quote", "code": "TDX_ERROR", "message": "quote unavailable"}
+    ]
+
+
+def test_hk_market_analysis_fails_on_core_kline_error() -> None:
+    class KlineFailingHkClient(FakeHkClient):
+        def goods_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            raise TdxError("kline unavailable")
+
+    result = facade.hk_market_analysis(
+        symbol="00700",
+        client_factory=KlineFailingHkClient,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "TDX_ERROR"
+    assert result["error"]["details"]["block"] == "kline"
+
+
 def test_hk_intraday_timeseries_facade() -> None:
     fake = FakeHkClient()
     result = facade.hk_intraday_timeseries(
@@ -985,6 +1111,7 @@ def test_service_health_tool_registered() -> None:
                 "hk_realtime_quotes",
                 "hk_kline_bars",
                 "hk_technical_indicators",
+                "hk_market_analysis",
                 "hk_intraday_timeseries",
             }.issubset(names)
 
