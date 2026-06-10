@@ -18,6 +18,7 @@ from easy_tdx import __version__ as module_version
 from easy_tdx.client import TdxClient
 from easy_tdx.ex.mac_client import MacExClient
 from easy_tdx.exceptions import TdxError
+from easy_tdx.indicator import compute_indicators, list_indicators
 from easy_tdx.mac.client import MacClient
 from easy_tdx.mac.enums import Adjust, BoardType, ExMarket, Period, SortOrder, SortType
 from easy_tdx.models.enums import Market
@@ -30,6 +31,11 @@ _DEFAULT_RANKING_LIMIT = 30
 _MAX_RANKING_LIMIT = 100
 _DEFAULT_EVENT_LIMIT = 100
 _MAX_EVENT_LIMIT = 600
+_DEFAULT_INDICATOR_ROW_LIMIT = 120
+_MAX_INDICATOR_ROW_LIMIT = 1000
+_DEFAULT_INDICATOR_WARMUP_ROWS = 120
+_MAX_INDICATOR_FETCH_ROWS = 1200
+_DEFAULT_TECHNICAL_INDICATORS = ["MACD", "KDJ", "RSI", "BOLL", "ATR", "CCI", "OBV", "BIAS"]
 _A_SHARE_MARKETS = {
     "SH": Market.SH,
     "SZ": Market.SZ,
@@ -232,6 +238,7 @@ class HkQuoteClient(Protocol):
 
 
 HkQuoteClientFactory = Callable[[], HkQuoteClient]
+IndicatorParams = dict[str, dict[str, int | float]]
 
 
 def _package_version() -> str:
@@ -619,6 +626,81 @@ def _parse_query_date(
         )
 
 
+def _supported_indicator_names() -> set[str]:
+    return {str(item["name"]).upper() for item in list_indicators()}
+
+
+def _normalize_indicator_names(
+    indicators: list[str] | None,
+    *,
+    query: dict[str, Any],
+    default: list[str] = _DEFAULT_TECHNICAL_INDICATORS,
+) -> tuple[list[str] | None, dict[str, Any] | None]:
+    raw_names = default if indicators is None else indicators
+    names = [name.strip().upper() for name in raw_names if name.strip()]
+    if not names:
+        return None, error_envelope(
+            "INVALID_INDICATOR",
+            "at least one technical indicator is required",
+            query=query,
+        )
+    supported = _supported_indicator_names()
+    unknown = [name for name in names if name not in supported]
+    if unknown:
+        return None, error_envelope(
+            "UNKNOWN_INDICATOR",
+            "unsupported technical indicator",
+            query=query,
+            details={"unknown": unknown, "supported": sorted(supported)},
+        )
+    return names, None
+
+
+def _indicator_limits(
+    count: int | None,
+    *,
+    query: dict[str, Any],
+) -> tuple[tuple[int, int] | None, dict[str, Any] | None]:
+    limit, error = _coerce_positive_limit(
+        count,
+        default=_DEFAULT_INDICATOR_ROW_LIMIT,
+        maximum=_MAX_INDICATOR_ROW_LIMIT,
+        query=query,
+    )
+    if error is not None:
+        return None, error
+    assert limit is not None
+    fetch_count = min(
+        max(limit + _DEFAULT_INDICATOR_WARMUP_ROWS, 200),
+        _MAX_INDICATOR_FETCH_ROWS,
+    )
+    if fetch_count > _MAX_INDICATOR_FETCH_ROWS:
+        return None, error_envelope(
+            "LIMIT_EXCEEDED",
+            f"indicator fetch_count supports at most {_MAX_INDICATOR_FETCH_ROWS} rows",
+            query=query,
+            details={"max": _MAX_INDICATOR_FETCH_ROWS, "actual": fetch_count},
+        )
+    return (limit, fetch_count), None
+
+
+def _indicator_error_envelope(
+    exc: Exception,
+    *,
+    query: dict[str, Any],
+) -> dict[str, Any]:
+    message = str(exc)
+    if isinstance(exc, ValueError):
+        if "未知指标" in message:
+            return error_envelope("UNKNOWN_INDICATOR", message, query=query)
+        if "缺少必要列" in message:
+            return error_envelope("INDICATOR_INPUT_MISSING", message, query=query)
+        return error_envelope("INVALID_INDICATOR_PARAM", message, query=query)
+    if isinstance(exc, TypeError):
+        return error_envelope("INVALID_INDICATOR_PARAM", message, query=query)
+    return error_envelope("TOOL_ERROR", message, query=query)
+
+
 def _default_mac_client_factory() -> QuoteClient:
     return cast(QuoteClient, MacClient.from_best_host())
 
@@ -984,6 +1066,93 @@ def a_share_market_snapshot(
     except Exception as exc:
         return error_envelope("TOOL_ERROR", str(exc), query=query)
     return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
+
+
+def technical_indicator_catalog() -> dict[str, Any]:
+    """Return technical indicator metadata without network IO."""
+    return envelope(source="easy_tdx", rows=dataframe_rows(pd.DataFrame(list_indicators())))
+
+
+def a_share_technical_indicators(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    period: str = "DAILY",
+    count: int | None = _DEFAULT_INDICATOR_ROW_LIMIT,
+    adjust: str = "QFQ",
+    indicators: list[str] | None = None,
+    params: IndicatorParams | None = None,
+    keep_ohlcv: bool = True,
+    client_factory: QuoteClientFactory = _default_mac_client_factory,
+) -> dict[str, Any]:
+    """Fetch A-share K-line bars and calculate technical indicators."""
+    query = {
+        "symbol": symbol,
+        "market": market,
+        "code": code,
+        "period": period,
+        "count": count,
+        "adjust": adjust,
+        "indicators": indicators or list(_DEFAULT_TECHNICAL_INDICATORS),
+        "params": params or {},
+        "keep_ohlcv": keep_ohlcv,
+    }
+    normalized, error = _normalize_single_a_share_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
+    if error is not None:
+        return error
+    assert normalized is not None
+    limits, error = _indicator_limits(count, query=query)
+    if error is not None:
+        return error
+    assert limits is not None
+    limit, fetch_count = limits
+    parsed_period, error = _parse_period(period, query=query)
+    if error is not None:
+        return error
+    assert parsed_period is not None
+    parsed_adjust, error = _parse_adjust(adjust, query=query)
+    if error is not None:
+        return error
+    assert parsed_adjust is not None
+    indicator_names, error = _normalize_indicator_names(indicators, query=query)
+    if error is not None:
+        return error
+    assert indicator_names is not None
+    market_id, parsed_code = normalized
+
+    try:
+        with client_factory() as client:
+            df = client.get_stock_kline(
+                market_id,
+                parsed_code,
+                period=parsed_period,
+                count=fetch_count,
+                adjust=parsed_adjust,
+            )
+        result = compute_indicators(
+            df,
+            indicator_names,
+            params=params or {},
+            keep_ohlcv=keep_ohlcv,
+            tail=limit,
+        )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except (ValueError, TypeError) as exc:
+        return _indicator_error_envelope(exc, query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+
+    response = envelope(source="easy_tdx", query=query, rows=dataframe_rows(result))
+    response["metadata"] = {
+        "fetch_count": fetch_count,
+        "warmup_rows": _DEFAULT_INDICATOR_WARMUP_ROWS,
+        "indicator_params": params or {},
+    }
+    return response
 
 
 def hk_realtime_quotes(

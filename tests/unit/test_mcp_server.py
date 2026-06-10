@@ -541,6 +541,116 @@ def test_a_share_market_snapshot_facade() -> None:
     assert result["rows"][0]["limit_down_count"] == 20
 
 
+def test_technical_indicator_catalog_facade() -> None:
+    result = facade.technical_indicator_catalog()
+
+    assert result["ok"] is True
+    names = {row["name"] for row in result["rows"]}
+    assert {"MACD", "KDJ", "RSI", "BOLL", "MA", "EMA"}.issubset(names)
+
+
+def test_a_share_technical_indicators_facade() -> None:
+    class IndicatorFakeClient(FakeMacClient):
+        def get_stock_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            times: int = 1,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            self.kline_args = {
+                "market": market,
+                "code": code,
+                "period": period,
+                "start": start,
+                "count": count,
+                "times": times,
+                "adjust": adjust,
+            }
+            return pd.DataFrame(
+                [
+                    {
+                        "datetime": pd.Timestamp("2026-06-09") + pd.Timedelta(days=i),
+                        "open": 10.0 + i,
+                        "close": 10.5 + i,
+                        "high": 10.8 + i,
+                        "low": 9.9 + i,
+                        "vol": 1000 + i,
+                    }
+                    for i in range(count)
+                ]
+            )
+
+    fake = IndicatorFakeClient()
+    result = facade.a_share_technical_indicators(
+        symbol="SH600519",
+        count=20,
+        indicators=["MACD", "RSI"],
+        params={"RSI": {"N": 14}},
+        keep_ohlcv=False,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.kline_args is not None
+    assert fake.kline_args["market"] == int(Market.SH)
+    assert fake.kline_args["code"] == "600519"
+    assert fake.kline_args["count"] == 200
+    assert fake.kline_args["adjust"] == Adjust.QFQ
+    assert result["metadata"] == {
+        "fetch_count": 200,
+        "warmup_rows": 120,
+        "indicator_params": {"RSI": {"N": 14}},
+    }
+    assert "MACD_DIF" in result["rows"][0]
+    assert "RSI" in result["rows"][0]
+    assert "open" not in result["rows"][0]
+
+
+def test_a_share_technical_indicators_rejects_unknown_indicator() -> None:
+    result = facade.a_share_technical_indicators(
+        symbol="SH600519",
+        indicators=["NO_SUCH_INDICATOR"],
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "UNKNOWN_INDICATOR"
+
+
+def test_a_share_technical_indicators_maps_missing_input() -> None:
+    class MissingHighLowClient(FakeMacClient):
+        def get_stock_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            times: int = 1,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            return pd.DataFrame([{"datetime": pd.Timestamp("2026-06-09"), "close": 10.0}])
+
+    result = facade.a_share_technical_indicators(
+        symbol="SH600519",
+        indicators=["KDJ"],
+        client_factory=MissingHighLowClient,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INDICATOR_INPUT_MISSING"
+
+
+def test_a_share_technical_indicators_enforces_return_limit() -> None:
+    result = facade.a_share_technical_indicators(symbol="SH600519", count=1001)
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "LIMIT_EXCEEDED"
+
+
 def test_hk_realtime_quotes_facade() -> None:
     fake = FakeHkClient()
     result = facade.hk_realtime_quotes(
@@ -653,6 +763,8 @@ def test_service_health_tool_registered() -> None:
                 "a_share_sector_ranking",
                 "a_share_market_events",
                 "a_share_market_snapshot",
+                "technical_indicator_catalog",
+                "a_share_technical_indicators",
                 "hk_realtime_quotes",
                 "hk_kline_bars",
                 "hk_intraday_timeseries",

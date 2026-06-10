@@ -171,6 +171,43 @@ def create_server() -> FastMCP:
         return facade.a_share_market_snapshot()
 
     @mcp.tool(
+        name="technical_indicator_catalog",
+        description="List supported technical indicators, inputs, outputs, and default parameters.",
+    )
+    def technical_indicator_catalog() -> dict[str, Any]:
+        return facade.technical_indicator_catalog()
+
+    @mcp.tool(
+        name="a_share_technical_indicators",
+        description=(
+            "Fetch A-share K-line bars and calculate technical indicators. "
+            "Returns only the final count rows; internal warmup rows are not returned."
+        ),
+    )
+    def a_share_technical_indicators(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        period: str = "DAILY",
+        count: int | None = 120,
+        adjust: str = "QFQ",
+        indicators: list[str] | None = None,
+        params: facade.IndicatorParams | None = None,
+        keep_ohlcv: bool = True,
+    ) -> dict[str, Any]:
+        return facade.a_share_technical_indicators(
+            symbol=symbol,
+            market=market,
+            code=code,
+            period=period,
+            count=count,
+            adjust=adjust,
+            indicators=indicators,
+            params=params,
+            keep_ohlcv=keep_ohlcv,
+        )
+
+    @mcp.tool(
         name="hk_realtime_quotes",
         description=(
             "Fetch Hong Kong realtime quotes. Bare codes default to HK_MAIN_BOARD; "
