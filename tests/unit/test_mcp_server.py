@@ -335,6 +335,22 @@ class FakeHkClient:
         )
 
 
+def _indicator_kline_rows(count: int, *, base: float = 10.0) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "datetime": pd.Timestamp("2026-06-09") + pd.Timedelta(days=i),
+                "open": base + i,
+                "close": base + 0.5 + i,
+                "high": base + 0.8 + i,
+                "low": base - 0.1 + i,
+                "vol": 1000 + i,
+            }
+            for i in range(count)
+        ]
+    )
+
+
 def test_service_health_facade() -> None:
     result = service_health()
 
@@ -611,6 +627,37 @@ def test_a_share_technical_indicators_facade() -> None:
     assert "open" not in result["rows"][0]
 
 
+def test_a_share_technical_indicators_uses_default_indicator_set() -> None:
+    class IndicatorFakeClient(FakeMacClient):
+        def get_stock_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            times: int = 1,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            self.kline_args = {"count": count}
+            return _indicator_kline_rows(count)
+
+    fake = IndicatorFakeClient()
+    result = facade.a_share_technical_indicators(
+        symbol="SH600519",
+        count=20,
+        keep_ohlcv=False,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.kline_args == {"count": 200}
+    assert result["count"] == 20
+    assert {"MACD_DIF", "KDJ_K", "RSI", "BOLL_UPPER", "ATR", "CCI", "OBV", "BIAS1"}.issubset(
+        result["rows"][0]
+    )
+
+
 def test_a_share_technical_indicators_rejects_unknown_indicator() -> None:
     result = facade.a_share_technical_indicators(
         symbol="SH600519",
@@ -795,6 +842,53 @@ def test_a_share_market_analysis_ignores_indicators_when_not_requested() -> None
     assert "indicators" not in result["data"]
 
 
+def test_a_share_market_analysis_rejects_invalid_include_combinations() -> None:
+    result = facade.a_share_market_analysis(
+        symbol="SH600519",
+        include_quote=False,
+        include_kline=False,
+        include_indicators=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_ANALYSIS_REQUEST"
+
+    result = facade.a_share_market_analysis(
+        symbol="SH600519",
+        include_quote=True,
+        include_kline=False,
+        include_indicators=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_ANALYSIS_REQUEST"
+
+
+def test_a_share_market_analysis_fails_on_core_indicator_error() -> None:
+    class MissingHighLowClient(FakeMacClient):
+        def get_stock_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            times: int = 1,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            return pd.DataFrame([{"datetime": pd.Timestamp("2026-06-09"), "close": 10.0}])
+
+    result = facade.a_share_market_analysis(
+        symbol="SH600519",
+        indicators=["KDJ"],
+        client_factory=MissingHighLowClient,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INDICATOR_INPUT_MISSING"
+    assert result["error"]["details"]["block"] == "indicators"
+
+
 def test_hk_realtime_quotes_facade() -> None:
     fake = FakeHkClient()
     result = facade.hk_realtime_quotes(
@@ -905,6 +999,36 @@ def test_hk_technical_indicators_facade() -> None:
     assert "MA" in result["rows"][0]
     assert "EMA" in result["rows"][0]
     assert "close" not in result["rows"][0]
+
+
+def test_hk_technical_indicators_uses_default_indicator_set() -> None:
+    class IndicatorFakeHkClient(FakeHkClient):
+        def goods_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            self.kline_args = {"count": count}
+            return _indicator_kline_rows(count, base=300.0)
+
+    fake = IndicatorFakeHkClient()
+    result = facade.hk_technical_indicators(
+        symbol="00700",
+        count=20,
+        keep_ohlcv=False,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.kline_args == {"count": 200}
+    assert result["count"] == 20
+    assert {"MACD_DIF", "KDJ_K", "RSI", "BOLL_UPPER", "ATR", "CCI", "OBV", "BIAS1"}.issubset(
+        result["rows"][0]
+    )
 
 
 def test_hk_technical_indicators_rejects_unknown_market() -> None:
@@ -1042,6 +1166,52 @@ def test_hk_market_analysis_fails_on_core_kline_error() -> None:
     assert result["ok"] is False
     assert result["error"]["code"] == "TDX_ERROR"
     assert result["error"]["details"]["block"] == "kline"
+
+
+def test_hk_market_analysis_rejects_invalid_include_combinations() -> None:
+    result = facade.hk_market_analysis(
+        symbol="00700",
+        include_quote=False,
+        include_kline=False,
+        include_indicators=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_ANALYSIS_REQUEST"
+
+    result = facade.hk_market_analysis(
+        symbol="00700",
+        include_quote=True,
+        include_kline=False,
+        include_indicators=False,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_ANALYSIS_REQUEST"
+
+
+def test_hk_market_analysis_fails_on_core_indicator_error() -> None:
+    class MissingHighLowHkClient(FakeHkClient):
+        def goods_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            return pd.DataFrame([{"datetime": pd.Timestamp("2026-06-09"), "close": 10.0}])
+
+    result = facade.hk_market_analysis(
+        symbol="00700",
+        indicators=["KDJ"],
+        client_factory=MissingHighLowHkClient,
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INDICATOR_INPUT_MISSING"
+    assert result["error"]["details"]["block"] == "indicators"
 
 
 def test_hk_intraday_timeseries_facade() -> None:

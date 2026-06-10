@@ -238,11 +238,11 @@ def compute_indicators(
     if df.empty:
         return pd.DataFrame(df.copy())
 
-    params = params or {}
+    params = {str(key).strip().upper(): value for key, value in (params or {}).items()}
     result_parts: list[pd.DataFrame] = []
     required_inputs: set[str] = set()
 
-    names_upper = [n.strip().upper() for n in indicators]
+    names_upper = list(dict.fromkeys(n.strip().upper() for n in indicators))
     unknown = [n for n in names_upper if n not in _REGISTRY]
     if unknown:
         raise ValueError(f"未知指标: {unknown}。可用指标: {sorted(_REGISTRY.keys())}")
@@ -264,7 +264,7 @@ def compute_indicators(
     for name in names_upper:
         spec = _REGISTRY[name]
         inputs = tuple(df[col].values for col in spec.inputs)
-        override = params.get(name, params.get(spec.name, {}))
+        override = params.get(name, {})
         kwargs = {**spec.default_params, **override}
         raw = spec.func(*inputs, **kwargs)
 

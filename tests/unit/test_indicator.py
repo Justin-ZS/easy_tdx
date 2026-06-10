@@ -100,6 +100,17 @@ class TestComputeIndicators:
         # 不同参数应产生不同结果
         assert not np.allclose(r1["MACD_DIF"].values, r2["MACD_DIF"].values, equal_nan=True)
 
+    def test_custom_params_are_case_insensitive(self):
+        df = _make_ohlcv()
+        r1 = compute_indicators(df, ["RSI"], params={"RSI": {"N": 6}})
+        r2 = compute_indicators(df, ["rsi"], params={"rsi": {"N": 6}})
+        assert np.allclose(r1["RSI"].values, r2["RSI"].values, equal_nan=True)
+
+    def test_duplicate_indicators_are_deduplicated(self):
+        df = _make_ohlcv()
+        result = compute_indicators(df, ["MA", "ma"], keep_ohlcv=False)
+        assert list(result.columns).count("MA") == 1
+
     def test_unknown_indicator_raises(self):
         df = _make_ohlcv()
         with pytest.raises(ValueError, match="未知指标"):
