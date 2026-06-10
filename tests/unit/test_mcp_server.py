@@ -702,6 +702,78 @@ def test_hk_kline_bars_facade() -> None:
     }
 
 
+def test_hk_technical_indicators_facade() -> None:
+    class IndicatorFakeHkClient(FakeHkClient):
+        def goods_kline(
+            self,
+            market: int,
+            code: str,
+            period: Period = Period.DAILY,
+            start: int = 0,
+            count: int = 800,
+            adjust: Adjust = Adjust.NONE,
+        ) -> pd.DataFrame:
+            self.kline_args = {
+                "market": market,
+                "code": code,
+                "period": period,
+                "start": start,
+                "count": count,
+                "adjust": adjust,
+            }
+            return pd.DataFrame(
+                [
+                    {
+                        "datetime": pd.Timestamp("2026-06-09") + pd.Timedelta(days=i),
+                        "open": 300.0 + i,
+                        "close": 301.0 + i,
+                        "high": 302.0 + i,
+                        "low": 299.0 + i,
+                        "vol": 1000 + i,
+                    }
+                    for i in range(count)
+                ]
+            )
+
+    fake = IndicatorFakeHkClient()
+    result = facade.hk_technical_indicators(
+        symbol="00700",
+        count=20,
+        indicators=["MA", "EMA"],
+        keep_ohlcv=False,
+        client_factory=lambda: fake,
+    )
+
+    assert result["ok"] is True
+    assert fake.kline_args == {
+        "market": int(ExMarket.HK_MAIN_BOARD),
+        "code": "00700",
+        "period": Period.DAILY,
+        "start": 0,
+        "count": 200,
+        "adjust": Adjust.QFQ,
+    }
+    assert result["metadata"] == {
+        "fetch_count": 200,
+        "warmup_rows": 120,
+        "indicator_params": {},
+    }
+    assert "MA" in result["rows"][0]
+    assert "EMA" in result["rows"][0]
+    assert "close" not in result["rows"][0]
+
+
+def test_hk_technical_indicators_rejects_unknown_market() -> None:
+    result = facade.hk_technical_indicators(
+        market="US_STOCK",
+        code="AAPL",
+        indicators=["MA"],
+    )
+
+    assert result["ok"] is False
+    assert result["error"]["code"] == "INVALID_MARKET"
+
+
 def test_hk_intraday_timeseries_facade() -> None:
     fake = FakeHkClient()
     result = facade.hk_intraday_timeseries(
@@ -767,6 +839,7 @@ def test_service_health_tool_registered() -> None:
                 "a_share_technical_indicators",
                 "hk_realtime_quotes",
                 "hk_kline_bars",
+                "hk_technical_indicators",
                 "hk_intraday_timeseries",
             }.issubset(names)
 

@@ -1242,6 +1242,88 @@ def hk_kline_bars(
     return envelope(source="easy_tdx", query=query, rows=dataframe_rows(df))
 
 
+def hk_technical_indicators(
+    *,
+    symbol: str | None = None,
+    market: str | None = None,
+    code: str | None = None,
+    period: str = "DAILY",
+    count: int | None = _DEFAULT_INDICATOR_ROW_LIMIT,
+    adjust: str = "QFQ",
+    indicators: list[str] | None = None,
+    params: IndicatorParams | None = None,
+    keep_ohlcv: bool = True,
+    client_factory: HkQuoteClientFactory = _default_hk_client_factory,
+) -> dict[str, Any]:
+    """Fetch Hong Kong K-line bars and calculate technical indicators."""
+    query = {
+        "symbol": symbol,
+        "market": market,
+        "code": code,
+        "period": period,
+        "count": count,
+        "adjust": adjust,
+        "indicators": indicators or list(_DEFAULT_TECHNICAL_INDICATORS),
+        "params": params or {},
+        "keep_ohlcv": keep_ohlcv,
+    }
+    normalized, error = _normalize_single_hk_symbol(
+        symbol=symbol, market=market, code=code, query=query
+    )
+    if error is not None:
+        return error
+    assert normalized is not None
+    limits, error = _indicator_limits(count, query=query)
+    if error is not None:
+        return error
+    assert limits is not None
+    limit, fetch_count = limits
+    parsed_period, error = _parse_period(period, query=query)
+    if error is not None:
+        return error
+    assert parsed_period is not None
+    parsed_adjust, error = _parse_adjust(adjust, query=query)
+    if error is not None:
+        return error
+    assert parsed_adjust is not None
+    indicator_names, error = _normalize_indicator_names(indicators, query=query)
+    if error is not None:
+        return error
+    assert indicator_names is not None
+    market_id, parsed_code = normalized
+
+    try:
+        with client_factory() as client:
+            df = client.goods_kline(
+                market_id,
+                parsed_code,
+                period=parsed_period,
+                count=fetch_count,
+                adjust=parsed_adjust,
+            )
+        result = compute_indicators(
+            df,
+            indicator_names,
+            params=params or {},
+            keep_ohlcv=keep_ohlcv,
+            tail=limit,
+        )
+    except TdxError as exc:
+        return error_envelope("TDX_ERROR", str(exc), query=query)
+    except (ValueError, TypeError) as exc:
+        return _indicator_error_envelope(exc, query=query)
+    except Exception as exc:
+        return error_envelope("TOOL_ERROR", str(exc), query=query)
+
+    response = envelope(source="easy_tdx", query=query, rows=dataframe_rows(result))
+    response["metadata"] = {
+        "fetch_count": fetch_count,
+        "warmup_rows": _DEFAULT_INDICATOR_WARMUP_ROWS,
+        "indicator_params": params or {},
+    }
+    return response
+
+
 def hk_intraday_timeseries(
     *,
     symbol: str | None = None,

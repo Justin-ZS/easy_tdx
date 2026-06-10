@@ -248,6 +248,36 @@ def create_server() -> FastMCP:
         )
 
     @mcp.tool(
+        name="hk_technical_indicators",
+        description=(
+            "Fetch Hong Kong K-line bars and calculate technical indicators. "
+            "Bare codes default to HK_MAIN_BOARD."
+        ),
+    )
+    def hk_technical_indicators(
+        symbol: str | None = None,
+        market: str | None = None,
+        code: str | None = None,
+        period: str = "DAILY",
+        count: int | None = 120,
+        adjust: str = "QFQ",
+        indicators: list[str] | None = None,
+        params: facade.IndicatorParams | None = None,
+        keep_ohlcv: bool = True,
+    ) -> dict[str, Any]:
+        return facade.hk_technical_indicators(
+            symbol=symbol,
+            market=market,
+            code=code,
+            period=period,
+            count=count,
+            adjust=adjust,
+            indicators=indicators,
+            params=params,
+            keep_ohlcv=keep_ohlcv,
+        )
+
+    @mcp.tool(
         name="hk_intraday_timeseries",
         description="Fetch Hong Kong intraday minute-level time series for one known symbol.",
     )
