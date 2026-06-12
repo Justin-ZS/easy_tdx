@@ -12,7 +12,7 @@ from importlib.metadata import PackageNotFoundError, version
 from types import TracebackType
 from typing import Any, Protocol, cast
 
-import pandas as pd  # type: ignore[import-untyped]
+import pandas as pd
 
 from easy_tdx import __version__ as module_version
 from easy_tdx.client import TdxClient
